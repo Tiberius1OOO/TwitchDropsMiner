@@ -104,12 +104,14 @@
             "filter": {
                 "name": "Szűrő",
                 "show": "Megjelenítés:",
+                "linked": "Összekapcsolt",
                 "not_linked": "Nem összekapcsolt",
                 "upcoming": "Közelgő",
                 "expired": "Lejárt",
                 "excluded": "Kizárt",
                 "finished": "Befejezett",
-                "refresh": "Frissítés"
+                "refresh": "Frissítés",
+                "help": "Összekapcsolt: csak azok a kampányok, amelyek játékfiókja már össze van kapcsolva. Nem összekapcsolt: azokat is mutatja, amelyeknél a kapcsolat még hiányzik; a jelölő nélkül csak az összekapcsolt játékok maradnak. Közelgő: még el nem indult kampányok. Lejárt: már véget ért kampányok. Kizárt: a kizárási lista játékai. Befejezett: kampányok, amelyek dropjai már be vannak gyűjtve. A jelölők csak csoportokat jelenítenek meg vagy rejtenek el. A sorrend marad: először a futó kampányok (az összekapcsoltak felül, a leghamarabb végzők legfelül), aztán a közelgők, aztán a lejártak."
             },
             "status": {
                 "linked": "Összekapcsolva ✔",

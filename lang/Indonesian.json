@@ -27,7 +27,7 @@
     "error": {
         "captcha": "Sambungan ditolak oleh CAPTCHA. Silakan coba lagi dalam waktu sekitar 12 jam.",
         "site_down": "Twitch tidak tersedia. Silakan coba lagi dalam {seconds} detik...",
-        "no_connection": "Tidak dapat tersambung ke Twitch. Silakan coba lagi dalam {detik} detik... ({url})"
+        "no_connection": "Tidak dapat tersambung ke Twitch. Silakan coba lagi dalam {seconds} detik... ({url})"
     },
     "gui": {
         "output": "Keluaran",
@@ -104,12 +104,14 @@
             "filter": {
                 "name": "Saring",
                 "show": "Tampilkan :",
+                "linked": "Tertaut",
                 "not_linked": "Non lié",
                 "upcoming": "Segera haidr",
                 "expired": "Kadaluarsa",
                 "excluded": "Dikecualikan",
                 "finished": "Selesai",
-                "refresh": "Muat ulang"
+                "refresh": "Muat ulang",
+                "help": "Tertaut: hanya kampanye yang akun gamenya sudah tertaut. Tidak ditautkan: tampilkan juga kampanye yang masih perlu ditautkan; tanpa centang ini hanya game yang tertaut yang terlihat. Segera hadir: kampanye yang belum mulai. Kadaluarsa: kampanye yang sudah berakhir. Dikecualikan: game dari daftar pengecualian. Selesai: kampanye yang dropnya sudah diambil. Centang hanya menampilkan atau menyembunyikan kelompok itu. Urutan tetap: kampanye yang sedang berjalan dulu (yang tertaut di atas, yang paling cepat berakhir di paling atas), lalu yang segera hadir, lalu yang kadaluarsa."
             },
             "status": {
                 "linked": "Ditautkan ✔",

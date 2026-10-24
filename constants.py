@@ -134,6 +134,9 @@ SCAN_CHANNELS_PER_GAME: int = 10
 # ... games the user actually wants get a much deeper probe, since a missed campaign
 # there is the difference between mining the drops and not seeing them at all
 SCAN_PRIORITY_CHANNELS_PER_GAME: int = 50
+# Games from the published campaign list. Deep enough to catch a campaign, without
+# asking 50 channels of every one of them before the inventory can show anything.
+SCAN_FEED_CHANNELS_PER_GAME: int = 20
 # Games of the catalogue probed per scan, and category-search pages fetched per scan
 SCAN_CATALOGUE_SLICE: int = 150
 SCAN_SEED_REQUESTS: int = 5
@@ -145,8 +148,8 @@ SCAN_KNOWN_DROPPER_DAYS: int = 14
 # Per scan, how many games that have live drops-enabled channels but reported no campaign
 # are asked again with the deeper channel probe
 SCAN_ESCALATION_GAMES: int = 60
-SCAN_BOOTSTRAP_SLICE: int = 400
-SCAN_BOOTSTRAP_SEED_REQUESTS: int = 25
+SCAN_BOOTSTRAP_SLICE: int = 60
+SCAN_BOOTSTRAP_SEED_REQUESTS: int = 8
 # Games that never had any drops are dropped from the catalogue after this many days
 CATALOGUE_KEEP_DAYS: int = 30
 # The catalogue is grown by asking Twitch's category search for these terms, a few pages

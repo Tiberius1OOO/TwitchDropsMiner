@@ -136,6 +136,7 @@ class GUIInvFilter(TypedDict):
     excluded: str
     finished: str
     refresh: str
+    help: str
 
 
 class GUIInvStatus(TypedDict):
@@ -158,6 +159,14 @@ class GUIInventory(TypedDict):
     and_more: str
     percent_progress: str
     minutes_progress: str
+    farm: str
+    hours_left: str
+    hours_needed: str
+    days_left: str
+    days_needed: str
+    starts_in_hours: str
+    starts_in_days: str
+    farm_hint: str
 
 
 class GUISettingsGeneral(TypedDict):
@@ -372,6 +381,11 @@ default_translation: Translation = {
                 "excluded": "Excluded",
                 "finished": "Finished",
                 "refresh": "Refresh",
+                "help": (
+                    "Show includes a group. Linked and Not linked together list every campaign. "
+                    "Upcoming, Expired, Excluded and Finished add those groups. "
+                    "Order stays: running first, ending soonest at the top, then upcoming, then expired."
+                ),
             },
             "status": {
                 "linked": "Linked ✔",
@@ -389,6 +403,14 @@ default_translation: Translation = {
             "and_more": "and {amount} more...",
             "percent_progress": "{percent}, {current}/{minutes} min",
             "minutes_progress": "{minutes} minutes",
+            "farm": "Farm",
+            "hours_left": "{left} h left",
+            "hours_needed": "{needed} h to collect all",
+            "days_left": "{left} d left",
+            "days_needed": "{needed} d to collect all",
+            "starts_in_hours": "starts in {left} h",
+            "starts_in_days": "starts in {left} d",
+            "farm_hint": "No Farm tick farms every listed game. A tick farms only those games.",
         },
         "settings": {
             "general": {
@@ -415,17 +437,29 @@ default_translation: Translation = {
             "scan": {
                 "name": "Drop scan",
                 "interval": "Scan for drops every: ",
+                "once": (
+                    "The drop list is loaded once, when nothing is saved yet. "
+                    "It is not scanned again on a timer. Scan now fetches every known drop "
+                    "and shows the full list."
+                ),
+                "scan_help": (
+                    "Asks the live channels of games that already have drops. "
+                    "This runs by itself only when nothing is saved yet."
+                ),
                 "minutes": "min",
                 "off": "Off",
                 "scan_now": "Scan now",
                 "never": "Not scanned yet",
                 "running": "Scanning for drops…",
+                "preparing": "Preparing the scan…",
+                "channels_phase": "channels",
+                "running_progress": "Scanning {done}/{total} · {game} · {campaigns} campaigns",
+                "started": "Drop scan started. Fetching every known campaign ({count} games).",
+                "partial": "Drop scan: {campaigns} campaign(s) found, still checking more games.",
                 "stale": "(stale)",
-                "status": (
-                    "Last scan: {when} UTC · games with drops: {drops} "
-                    "· in the catalogue: {total}"
-                ),
+                "status": "Last scan: {when} UTC · {drops} games with drops",
                 "coverage_label": "Games checked: ",
+                "saved": "Inventory is showing these {campaigns} games.",
                 "coverage": (
                     "Checked {probed} of {total} games ({percent}) · from the published list: "
                     "{seed} · campaigns: {campaigns}"
@@ -449,8 +483,14 @@ default_translation: Translation = {
             "reload": "Reload",
             "reload_text": "Most changes require a reload to take an immediate effect: ",
             "feed_reload": "Update the drops list",
-            "feed_status": "Drops list: {count} campaigns · {generated}",
-            "feed_unknown": "Drops list: not loaded yet",
+            "feed_help": (
+                "Downloads the published list of which games currently have drops, "
+                "then scans those games if the list changed. "
+                "Reload below only redraws the inventory from what is already saved."
+            ),
+            "feed_current": "The drops list is already current. Nothing new to scan.",
+            "feed_status": "{count} campaigns in the published list · {generated}",
+            "feed_unknown": "Published drops list: not loaded yet",
         },
         "help": {
             "about": {

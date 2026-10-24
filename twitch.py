@@ -54,6 +54,7 @@ from constants import (
     SCAN_BOOTSTRAP_CATALOGUE,
     SCAN_KNOWN_DROPPER_DAYS,
     SCAN_ESCALATION_GAMES,
+    SCAN_FEED_CHANNELS_PER_GAME,
     GAMES_SEED_PATH,
     GAMES_SEED_URL,
     GAMES_SEED_CACHE_PATH,
@@ -524,6 +525,21 @@ class Twitch:
         self._drops: dict[str, TimedDrop] = {}
         self._campaigns: dict[str, DropsCampaign] = {}
         self._mnt_triggers: deque[datetime] = deque()
+        # live numbers for the settings scan panel; the GUI is built next and reads this
+        self._scan_progress: dict[str, Any] = {
+            "phase": "idle",
+            "done": 0,
+            "total": 0,
+            "game": "",
+            "campaigns": 0,
+        }
+        # bumped whenever a scan finishes, so an inventory fetch already in progress
+        # loads the finished list instead of keeping the copy it started with
+        self._inventory_epoch: int = 0
+        # set when a scan finishes during another state, so that state's final
+        # change_state cannot throw the reload away
+        self._reload_pending: bool = False
+        self._feed_task: asyncio.Task[None] | None = None
         # NOTE: GQL is pretty volatile and breaks everything if one runs into their rate limit.
         # Do not modify the default, safe values.
         self._qgl_limiter = RateLimiter(capacity=5, window=1)
@@ -663,6 +679,12 @@ class Twitch:
             self._state = state
         self._state_change.set()
 
+    def _request_inventory_reload(self) -> None:
+        """Asks the main loop to rebuild the inventory from the latest saved drops."""
+        self._inventory_epoch += 1
+        self._reload_pending = True
+        self.change_state(State.INVENTORY_FETCH)
+
     def state_change(self, state: State) -> abc.Callable[[], None]:
         # this is identical to change_state, but defers the call
         # perfect for GUI usage
@@ -750,8 +772,6 @@ class Twitch:
         self._watching_task = asyncio.create_task(self._watch_loop())
         if self._scan_loop_task is None or self._scan_loop_task.done():
             self._scan_loop_task = asyncio.create_task(self._scan_loop())
-        # refresh the published feeds in the background, it must not delay the startup
-        asyncio.create_task(self.refresh_feeds())
         # Add default topics
         self.websocket.add_topics([
             WebsocketTopic("User", "Drops", auth_state.user_id, self.process_drops),
@@ -763,6 +783,10 @@ class Twitch:
         channels: Final[OrderedDict[int, Channel]] = self.channels
         self.change_state(State.INVENTORY_FETCH)
         while True:
+            if self._reload_pending and self._state is not State.EXIT:
+                self._reload_pending = False
+                if self._state is not State.INVENTORY_FETCH:
+                    self._state = State.INVENTORY_FETCH
             if self._state is State.IDLE:
                 if self.settings.dump:
                     self.gui.close()
@@ -776,7 +800,15 @@ class Twitch:
                 self.gui.tray.change_icon("maint")
                 # ensure the websocket is running
                 await self.websocket.start()
-                await self.fetch_inventory()
+                while self._state is State.INVENTORY_FETCH:
+                    epoch = self._inventory_epoch
+                    await self.fetch_inventory()
+                    # a scan finished while this fetch was reading the previous file
+                    if self._state is State.INVENTORY_FETCH and self._inventory_epoch != epoch:
+                        continue
+                    break
+                if self._state is State.EXIT:
+                    continue
                 self.gui.set_games(
                     set(
                         campaign.game
@@ -801,8 +833,7 @@ class Twitch:
                 priority_mode = self.settings.priority_mode
                 priority_only = priority_mode is PriorityMode.PRIORITY_ONLY
                 next_hour = datetime.now(timezone.utc) + timedelta(hours=1)
-                # sorted_campaigns: list[DropsCampaign] = list(self.inventory)
-                sorted_campaigns: list[DropsCampaign] = self.inventory
+                sorted_campaigns: list[DropsCampaign] = list(self.inventory)
                 if not priority_only:
                     if priority_mode is PriorityMode.ENDING_SOONEST:
                         sorted_campaigns.sort(key=lambda c: c.ends_at)
@@ -1903,7 +1934,7 @@ class Twitch:
             return {}
         campaigns = loaded.get("campaigns") if isinstance(loaded, dict) else None
         if not isinstance(campaigns, list):
-            return set()
+            return {}
         now = datetime.now(timezone.utc)
         horizon = now + timedelta(days=CAMPAIGNS_LOOKAHEAD_DAYS)
         names: dict[str, str] = {}
@@ -2072,6 +2103,55 @@ class Twitch:
         }
 
     @property
+    def scan_progress(self) -> dict[str, Any]:
+        return self._scan_progress
+
+    def _set_scan_progress(
+        self, phase: str, done: int, total: int, game: str, campaigns: int
+    ) -> None:
+        self._scan_progress = {
+            "phase": phase,
+            "done": done,
+            "total": total,
+            "game": game,
+            "campaigns": campaigns,
+        }
+
+    def _note_scan_attempt(self, games_probed: int, channels_asked: int) -> JsonType:
+        """
+        Records that a scan finished, even when it saw no live channels.
+
+        An empty result used to look like "never scanned", so the next inventory
+        reload started another scan. Campaigns already on disk stay put.
+        """
+        previous, _stale = self.load_scan_cache()
+        if previous.get("scanned_at"):
+            previous["scanned_at"] = isonow()
+            previous["games_probed"] = games_probed
+            previous["channels_asked"] = channels_asked
+            self._write_scan_cache(previous)
+            return previous
+        scan_data: JsonType = {
+            "scanned_at": isonow(),
+            "channels_asked": channels_asked,
+            "games_probed": games_probed,
+            "games_with_drops": [],
+            "campaigns": {},
+            "channel_campaigns": {},
+        }
+        self._write_scan_cache(scan_data)
+        return scan_data
+
+    def _write_scan_cache(self, scan_data: JsonType) -> None:
+        temporary = SCAN_PATH.with_name(f"{SCAN_PATH.name}.new")
+        try:
+            with open(temporary, "w", encoding="utf8") as scan_file:
+                json.dump(scan_data, scan_file, ensure_ascii=False, indent=1)
+            temporary.replace(SCAN_PATH)
+        except OSError as exc:
+            logger.warning(f"Drop scan: unable to save the results: {exc}")
+
+    @property
     def scan_running(self) -> bool:
         # NOTE: the GUI is built before the task fields exist, so this has to be lenient
         task = getattr(self, "_scan_task", None)
@@ -2141,106 +2221,47 @@ class Twitch:
         through Helix, every one of them is checked for live drops-enabled channels, and
         each of those channels reports the campaigns available to this account.
         """
-        games: dict[str, Game] = {}
-        popular_names: set[str] = set()
-        try:
-            for game in await self.helix_top_games(self.settings.scan_top_games):
-                games[game.name] = game
-                popular_names.add(game.name)
-        except (MinerException, RequestException) as exc:
-            logger.warning(f"Drop scan: unable to fetch the popular games list: {exc}")
-        # every game the previous scans have found is a candidate again: the popular
-        # games list alone never covers the niche titles the drops usually sit on
+        # Only games that already have drops, plus the priority list and the published
+        # feed. Walking the whole catalogue is what made the first scan look stuck.
         catalogue: dict[str, JsonType] = self.load_game_catalogue()
         seed_state: JsonType = self.load_catalogue_seed_state()
-        seed_state = self._apply_games_seed(catalogue, seed_state)
-        # While the catalogue is still small the scan spends more on growing and probing it:
-        # a fresh install otherwise needs days to reach the coverage an established one has.
-        unprobed: int = sum(1 for entry in catalogue.values() if not entry.get("last_scan"))
-        bootstrapping: bool = unprobed > 0 or len(catalogue) < SCAN_BOOTSTRAP_CATALOGUE
-        seed_budget: int = int(self.settings.scan_seed_requests)
-        if bootstrapping:
-            seed_budget = max(seed_budget, int(self.settings.scan_bootstrap_seed_requests))
-        # grow the catalogue from Twitch's category search
-        try:
-            _seeded, seed_state = await self._seed_game_catalogue(
-                catalogue, seed_state, seed_budget
-            )
-        except Exception as exc:  # noqa: BLE001 - a failed harvest must not kill the scan
-            logger.warning(f"Drop scan: unable to grow the games catalogue: {exc}")
-        for game_name, game_entry in catalogue.items():
-            # keep the fuller Game objects the popular list gave us, they carry a real id
-            games.setdefault(
-                game_name, Game({"id": int(game_entry.get("id") or 0), "name": game_name})
-            )
-        # games of the campaigns we already know, and of the priority list, always count
-        for campaign in self.inventory:
-            if not campaign.game.is_channel_drops():
-                games.setdefault(campaign.game.name, campaign.game)
-        for game_name in self.settings.priority:
-            games.setdefault(game_name, Game({"id": 0, "name": game_name}))
         excluded_names: set[str] = {name.casefold() for name in self.settings.exclude}
-        games = {
-            name: game for name, game in games.items() if name.casefold() not in excluded_names
-        }
-        # The catalogue keeps growing, while probing a game costs a request and the scan has
-        # to stay cheap: the games the growing catalogue adds are checked in slices, the
-        # ones probed longest ago first, so the whole list still gets covered over time.
         priority_names: set[str] = {name.casefold() for name in self.settings.priority}
         priority_names.update(game.name.casefold() for game in self.wanted_games)
-        always_names: set[str] = set(priority_names)
-        always_names.update(
-            campaign.game.name.casefold()
-            for campaign in self.inventory
-            if not campaign.game.is_channel_drops()
-        )
-        always_names.update(name.casefold() for name in popular_names)
-        # games with a campaign that is running or starts soon, as published by the maintainer:
-        # they are probed deep on every scan instead of waiting for the slice rotation
         feed_games: dict[str, str] = self._feed_active_games()
         feed_names: set[str] = set(feed_games)
-        if feed_games:
-            for feed_name in feed_games.values():
-                # a game only the feed knows about still has to be probed
-                games.setdefault(feed_name, Game({"id": 0, "name": feed_name}))
-            priority_names.update(feed_names)
-            always_names.update(feed_names)
-            logger.log(CALL, f"Drop scan: {len(feed_names)} game(s) taken from the campaigns feed")
-        slice_size: int = max(0, int(self.settings.scan_catalogue_slice))
-        if bootstrapping:
-            slice_size = max(slice_size, int(self.settings.scan_bootstrap_slice))
-        known_dropper_after: str = isonow()[:10]  # ISO date, compared lexicographically
         recently_had_drops: str = (
             datetime.now(timezone.utc) - timedelta(days=SCAN_KNOWN_DROPPER_DAYS)
         ).strftime("%Y-%m-%d")
-
-        def rotation_key(item: tuple[str, JsonType]) -> tuple[int, str]:
-            entry = item[1]
+        known_names: set[str] = set(priority_names)
+        known_names.update(feed_names)
+        previous_scan, _previous_stale = self.load_scan_cache()
+        for game_name in previous_scan.get("games_with_drops") or []:
+            if isinstance(game_name, str):
+                known_names.add(game_name.casefold())
+        for name, entry in catalogue.items():
             last_drop = str(entry.get("last_drop") or "")
-            # a game that ran a campaign recently is worth checking first, every cycle
-            weight = 0 if last_drop and last_drop[:10] >= recently_had_drops else 1
-            return weight, str(entry.get("last_scan") or "")
-
-        rotating = sorted(
-            (
-                (name, entry)
-                for name, entry in catalogue.items()
-                if name.casefold() not in always_names and name in games
-            ),
-            key=rotation_key,
-        )
-        probed_slice = {name for name, _entry in rotating[:slice_size]}
-        skipped = len(rotating) - len(probed_slice)
-        games = {
-            name: game
-            for name, game in games.items()
-            if name.casefold() in always_names or name in probed_slice
-        }
-        if skipped:
-            logger.log(
-                CALL,
-                f"Drop scan: {skipped} catalogue game(s) wait for their turn in a later slice",
-            )
+            if last_drop and last_drop[:10] >= recently_had_drops:
+                known_names.add(name.casefold())
+        known_names.difference_update(excluded_names)
+        games: dict[str, Game] = {}
+        for name, entry in catalogue.items():
+            if name.casefold() not in known_names:
+                continue
+            games[name] = Game({"id": int(entry.get("id") or 0), "name": name})
+        for campaign in self.inventory:
+            folded = campaign.game.name.casefold()
+            if campaign.game.is_channel_drops() or folded not in known_names:
+                continue
+            games[campaign.game.name] = campaign.game
+        for game_name in self.settings.priority:
+            if game_name.casefold() in known_names:
+                games.setdefault(game_name, Game({"id": 0, "name": game_name}))
+        for feed_name in feed_games.values():
+            if feed_name.casefold() in known_names:
+                games.setdefault(feed_name, Game({"id": 0, "name": feed_name}))
+        if feed_names:
+            logger.log(CALL, f"Drop scan: {len(feed_names)} game(s) taken from the campaigns feed")
 
         # channels to ask about: live drops-enabled channels of every candidate game
         # NOTE: Twitch reports a campaign only on some of the channels streaming a game
@@ -2248,18 +2269,51 @@ class Twitch:
         # wants is probed much deeper than the rest of the catalogue
         shallow_depth: int = max(1, int(self.settings.scan_channels_per_game))
         deep_depth: int = max(shallow_depth, int(self.settings.scan_priority_channels))
+        feed_depth: int = max(shallow_depth, SCAN_FEED_CHANNELS_PER_GAME)
         channels: dict[int, Channel] = {}
         channel_games: dict[int, Game] = {}
-        for game in games.values():
-            depth: int = deep_depth if game.name.casefold() in priority_names else shallow_depth
-            try:
-                game_channels = await self.get_live_streams(game, limit=depth)
-            except MinerException:
-                logger.log(CALL, f"Drop scan: no live drops-enabled channels for: {game.name}")
-                continue
-            for channel in game_channels:
-                channels[channel.id] = channel
-                channel_games[channel.id] = game
+
+        def depth_for(game: Game) -> int:
+            folded = game.name.casefold()
+            if folded in priority_names:
+                return deep_depth
+            if folded in feed_names:
+                return feed_depth
+            return shallow_depth
+
+        async def probe_games(game_list: list[Game], phase: str) -> None:
+            total = len(game_list)
+            done = 0
+            self._set_scan_progress(phase, 0, total, "", len(game_campaigns))
+            for group in chunk(game_list, 5):
+                async def lookup(game: Game) -> tuple[Game, list[Channel]]:
+                    try:
+                        found = await self.get_live_streams(game, limit=depth_for(game))
+                    except MinerException:
+                        logger.log(CALL, f"Drop scan: no live drops-enabled channels for: {game.name}")
+                        found = []
+                    return game, found
+
+                for game, found in await asyncio.gather(*(lookup(game) for game in group)):
+                    done += 1
+                    for channel in found:
+                        channels[channel.id] = channel
+                        channel_games[channel.id] = game
+                    self._set_scan_progress(phase, done, total, game.name, len(game_campaigns))
+
+        # One pass over the games that actually have a known campaign. The extra
+        # catalogue tail used to keep running after the first results and the inventory
+        # was never rebuilt from the finished file.
+        urgent_games = list(games.values())
+        self.print(
+            _("gui", "settings", "scan", "started").format(count=len(urgent_games))
+        )
+        game_campaigns: dict[str, JsonType] = {}
+        raw_channel_campaigns: dict[str, JsonType] = {}
+        channel_campaigns: dict[str, JsonType] = {}
+        games_with_drops: set[str] = set()
+        asked: set[int] = set()
+        await probe_games(urgent_games, "games")
         if self.settings.channel_campaigns == "all":
             # additionally ask about the most watched drops-enabled channels overall
             try:
@@ -2269,13 +2323,7 @@ class Twitch:
                 logger.warning(f"Drop scan: unable to fetch drops-enabled channels: {exc}")
         if not channels:
             logger.warning("Drop scan: no live drops-enabled channels found at all")
-            return {}
-
-        game_campaigns: dict[str, JsonType] = {}
-        raw_channel_campaigns: dict[str, JsonType] = {}
-        channel_campaigns: dict[str, JsonType] = {}
-        games_with_drops: set[str] = set()
-        asked: set[int] = set()
+            return self._note_scan_attempt(len(urgent_games), 0)
 
         async def ask_channels(to_ask: dict[int, Channel]) -> None:
             """Asks the channels what campaigns they carry and merges the results."""
@@ -2286,18 +2334,24 @@ class Twitch:
                 GQL_QUERIES["AvailableDrops"].with_variables({"channelID": str(channel_id)})
                 for channel_id in to_ask
             ]
-            for available_drops_chunk in chunk(available_drops_ops, 20):
+            batches = list(chunk(available_drops_ops, 20))
+            for index, available_drops_chunk in enumerate(batches, start=1):
+                self._set_scan_progress(
+                    "channels", index, len(batches), "", len(game_campaigns)
+                )
                 try:
                     response_list: list[JsonType] = await self.gql_request(available_drops_chunk)
                 except MinerException as exc:
                     logger.warning(f"Drop scan: available drops batch failed: {exc}")
                     continue
                 for response_json in response_list:
-                    channel_info: JsonType | None = response_json["data"]["channel"]
-                    if channel_info is None:
+                    channel_info: JsonType | None = (response_json.get("data") or {}).get("channel")
+                    if not isinstance(channel_info, dict) or "id" not in channel_info:
                         continue
-                    channel = to_ask[int(channel_info["id"])]
-                    for campaign_data in channel_info["viewerDropCampaigns"] or []:
+                    channel = to_ask.get(int(channel_info["id"]))
+                    if channel is None:
+                        continue
+                    for campaign_data in channel_info.get("viewerDropCampaigns") or []:
                         if campaign_data.get("game") is not None:
                             if campaign_data["id"] in game_campaigns:
                                 continue
@@ -2313,7 +2367,10 @@ class Twitch:
                             campaign_data["id"], {"data": campaign_data, "channel": channel}
                         )
 
-        await ask_channels(channels)
+        await ask_channels(dict(channels))
+        if not asked:
+            logger.warning("Drop scan: no live drops-enabled channels found at all")
+            return self._note_scan_attempt(len(urgent_games), len(channels))
 
         # Twitch reports a campaign only on some of the channels streaming it (measured: 5 of
         # 60 on a busy game), so a game with live drops-enabled channels that told us nothing
@@ -2326,8 +2383,8 @@ class Twitch:
         for channel_id, channel_game in channel_games.items():
             if channel_id not in asked:
                 continue
-            if channel_game.name.casefold() in priority_names:
-                # already probed deep in the first pass
+            if depth_for(channel_game) >= deep_depth:
+                # the first pass already asked this game at full depth
                 continue
             if channel_game.name in games_with_campaign:
                 continue
@@ -2387,23 +2444,19 @@ class Twitch:
         for campaign_data in carried:
             games_with_drops.add(campaign_data["game"]["displayName"])
 
-        catalogue = self._update_game_catalogue(catalogue, games.values(), games_with_drops)
+        catalogue = self._update_game_catalogue(catalogue, urgent_games, games_with_drops)
         self.save_game_catalogue(catalogue, seed_state)
         scan_data: JsonType = {
             "scanned_at": isonow(),
             "channels_asked": len(channels),
-            "games_probed": len(games),
+            "games_probed": len(urgent_games),
             "games_with_drops": sorted(games_with_drops),
             "campaigns": game_campaigns,
             "channel_campaigns": channel_campaigns,
         }
-        try:
-            with open(SCAN_PATH, "w", encoding="utf8") as scan_file:
-                json.dump(scan_data, scan_file, ensure_ascii=False, indent=1)
-        except OSError as exc:
-            logger.warning(f"Drop scan: unable to save the results: {exc}")
+        self._write_scan_cache(scan_data)
         logger.info(
-            f"Drop scan: {len(games)} game(s) checked, {len(channels)} channels asked, "
+            f"Drop scan: {len(urgent_games)} game(s) checked, {len(channels)} channels asked, "
             f"{len(game_campaigns)} game campaign(s) and "
             f"{len(channel_campaigns)} channel campaign(s) available, "
             f"{len(games_with_drops)} game(s) with drops, "
@@ -2484,7 +2537,9 @@ class Twitch:
                 return
             loop.call_soon_threadsafe(self.request_feed_refresh)
             return
-        asyncio.create_task(self._feed_refresh_task())
+        if self._feed_task is not None and not self._feed_task.done():
+            return
+        self._feed_task = asyncio.create_task(self._feed_refresh_task())
 
     async def _feed_refresh_task(self) -> None:
         try:
@@ -2501,7 +2556,10 @@ class Twitch:
             f"({', '.join(changed) if changed else 'nothing new'}), list of campaigns: "
             f"{count}, published {generated or 'unknown'}"
         )
-        self.start_scan()
+        if changed:
+            self.start_scan()
+        else:
+            self.print(_("gui", "settings", "feed_current"))
 
     def start_scan(self) -> None:
         """
@@ -2521,18 +2579,16 @@ class Twitch:
                 return
             loop.call_soon_threadsafe(self.start_scan)
             return
+        # assigned before the task can print, so a second click cannot start a twin scan
         self._scan_task = asyncio.create_task(self._scan_task_wrapper())
 
     async def _scan_loop(self) -> None:
         """
-        Keeps the drop scan on the schedule picked in the settings.
+        Loads every known drop once, when nothing has been saved yet.
 
-        The inventory fetch only happens now and then, so waiting for it would make a
-        short interval meaningless: the schedule is checked here instead, independently.
-
-        The published feeds are refreshed from here too: they decide which games the scan
-        probes deep, and a machine that stays open for days would otherwise keep working from
-        the copy it downloaded at startup. The interval check is inside the refresh itself.
+        A timer used to start another scan whenever the file was older than the interval.
+        That second pass overlapped the inventory fetch and the list on screen stayed on
+        the first handful of campaigns. Further scans happen only from the Scan now button.
         """
         while True:
             try:
@@ -2542,10 +2598,10 @@ class Twitch:
             except Exception as exc:
                 logger.warning(f"Drop scan: the feeds refresh failed: {exc}")
             try:
-                if self.settings.scan_drops and not self.scan_running:
-                    _scan_data, stale = self.load_scan_cache()
-                    if stale:
-                        logger.info("Drop scan: the cached results are stale, scanning now")
+                if not self.scan_running:
+                    scan_data, _stale = self.load_scan_cache()
+                    if not scan_data.get("scanned_at"):
+                        logger.info("Drop scan: no saved drops yet, scanning once")
                         self.start_scan()
                         while self.scan_running:
                             await asyncio.sleep(5)
@@ -2553,19 +2609,23 @@ class Twitch:
                 raise
             except Exception as exc:
                 logger.warning(f"Drop scan: schedule check failed: {exc}")
-            await asyncio.sleep(30)
+            await asyncio.sleep(60)
 
     async def _scan_task_wrapper(self) -> None:
+        self._set_scan_progress("prepare", 0, 0, "", 0)
         try:
             scan_data = await self.scan_drops()
         except asyncio.CancelledError:
             raise
         except Exception as exc:
             logger.warning(f"Drop scan failed: {exc}")
+            self._set_scan_progress("error", 0, 0, str(exc), 0)
+            self.print(f"Drop scan failed: {exc}")
             return
+        self._set_scan_progress("idle", 0, 0, "", 0)
         if scan_data:
-            # pick the new campaigns up on the next inventory fetch
-            self.change_state(State.INVENTORY_FETCH)
+            # the fetch that may already be running started from the previous file
+            self._request_inventory_reload()
 
     def _build_game_campaign(self, campaign_data: JsonType) -> JsonType | None:
         """
@@ -2671,11 +2731,13 @@ class Twitch:
         for available_drops_chunk in chunk(available_drops_ops, 20):
             response_list: list[JsonType] = await self.gql_request(available_drops_chunk)
             for response_json in response_list:
-                channel_info: JsonType | None = response_json["data"]["channel"]
-                if channel_info is None:
+                channel_info: JsonType | None = (response_json.get("data") or {}).get("channel")
+                if not isinstance(channel_info, dict) or "id" not in channel_info:
                     continue
-                channel = channels[int(channel_info["id"])]
-                for campaign_data in channel_info["viewerDropCampaigns"] or []:
+                channel = channels.get(int(channel_info["id"]))
+                if channel is None:
+                    continue
+                for campaign_data in channel_info.get("viewerDropCampaigns") or []:
                     campaign_id: str = campaign_data["id"]
                     if (
                         campaign_id in known_campaigns
@@ -2827,20 +2889,31 @@ class Twitch:
             for task in fetch_campaigns_tasks:
                 task.cancel()
             raise
-        # Twitch can't be asked about campaigns anymore, so they come from the drop scan
-        scan_data: JsonType = {}
-        if self.settings.scan_drops:
-            scan_data, scan_is_stale = self.load_scan_cache()
-            for scan_key in ("campaigns", "channel_campaigns"):
-                if scan_key == "channel_campaigns" and self.settings.channel_campaigns == "off":
-                    # not wanted: don't resurrect campaigns from an older scan either
-                    continue
-                for campaign_id, campaign_data in (scan_data.get(scan_key) or {}).items():
-                    inventory_data.setdefault(campaign_id, campaign_data)
-            if scan_is_stale:
-                # keep mining what we have, refresh the list in the background
-                logger.info("Drop scan: the results are stale, scanning in the background")
-                self.start_scan()
+        # Twitch's campaign dashboard answers with nothing. The saved scan is the list,
+        # whether or not the old "scan every N minutes" switch is on.
+        linked_by_game: dict[str, bool] = {}
+        for campaign_data in ongoing_campaigns:
+            game = campaign_data.get("game") or {}
+            self_data = campaign_data.get("self") or {}
+            game_id = str(game.get("id") or "")
+            if game_id and "isAccountConnected" in self_data:
+                linked_by_game[game_id] = bool(self_data["isAccountConnected"])
+        scan_data, _scan_is_stale = self.load_scan_cache()
+        for scan_key in ("campaigns", "channel_campaigns"):
+            if scan_key == "channel_campaigns" and self.settings.channel_campaigns == "off":
+                # not wanted: don't resurrect campaigns from an older scan either
+                continue
+            for campaign_id, campaign_data in (scan_data.get(scan_key) or {}).items():
+                if isinstance(campaign_data, dict):
+                    game = campaign_data.get("game") or {}
+                    game_id = str(game.get("id") or "")
+                    self_data = campaign_data.get("self")
+                    if game_id in linked_by_game and isinstance(self_data, dict):
+                        self_data["isAccountConnected"] = linked_by_game[game_id]
+                inventory_data.setdefault(campaign_id, campaign_data)
+        if not scan_data.get("scanned_at") and not self.scan_running:
+            logger.info("Drop scan: no saved drops yet, scanning once")
+            self.start_scan()
         if not scan_data and self.settings.campaign_discovery:
             # fallback for setups with the drop scan turned off
             status_update(_("gui", "status", "fetching_campaigns"))
@@ -2853,7 +2926,9 @@ class Twitch:
                     inventory_data.setdefault(campaign_id, campaign_data)
         # filter out invalid campaigns
         for campaign_id in list(inventory_data.keys()):
-            if inventory_data[campaign_id]["game"] is None:
+            campaign_data = inventory_data[campaign_id]
+            game = campaign_data.get("game") if isinstance(campaign_data, dict) else None
+            if not isinstance(game, dict):
                 del inventory_data[campaign_id]
 
         if self.settings.dump:
@@ -2881,13 +2956,28 @@ class Twitch:
                 json.dump(inventory["gameEventDrops"], file, indent=4, sort_keys=True, default=str)
 
         # use the merged data to create campaign objects
-        campaigns: list[DropsCampaign] = [
-            DropsCampaign(self, campaign_data, claimed_benefits)
-            for campaign_data in inventory_data.values()
-        ]
-        campaigns.sort(key=lambda c: c.active, reverse=True)
-        campaigns.sort(key=lambda c: c.upcoming and c.starts_at or c.ends_at)
-        campaigns.sort(key=lambda c: c.eligible, reverse=True)
+        campaigns: list[DropsCampaign] = []
+        for campaign_data in inventory_data.values():
+            try:
+                campaigns.append(DropsCampaign(self, campaign_data, claimed_benefits))
+            except (KeyError, TypeError, ValueError) as exc:
+                logger.warning(f"Inventory: skipped a campaign that could not be read: {exc}")
+        def inventory_order(campaign: DropsCampaign) -> tuple[int, int, float]:
+            # Running first, soonest end at the top, connected accounts above the rest.
+            # Upcoming follows by start time, expired by most recently ended.
+            # The Show boxes only hide groups; they do not change this order.
+            if campaign.active:
+                group = 0
+                moment = campaign.ends_at.timestamp()
+            elif campaign.upcoming:
+                group = 1
+                moment = campaign.starts_at.timestamp()
+            else:
+                group = 2
+                moment = -campaign.ends_at.timestamp()
+            return (group, 0 if campaign.eligible else 1, moment)
+
+        campaigns.sort(key=inventory_order)
 
         self._drops.clear()
         self.gui.inv.clear()
@@ -2902,31 +2992,12 @@ class Twitch:
                 switch_triggers.update(campaign.time_triggers)
             self.inventory.append(campaign)
             self._campaigns[campaign.id] = campaign
-        # concurrently add the campaigns into the GUI
-        # NOTE: this fetches pictures from the CDN, so might be slow without a cache
+        # The list is one snapshot in its own window. Building a Tk card per
+        # campaign is what made the inventory slow and the scroll tear.
         status_update(
-            _("gui", "status", "adding_campaigns").format(counter=f"(0/{len(campaigns)})")
+            _("gui", "status", "adding_campaigns").format(counter=f"({len(campaigns)})")
         )
-        add_campaign_tasks: list[asyncio.Task[None]] = [
-            asyncio.create_task(self.gui.inv.add_campaign(campaign))
-            for campaign in campaigns
-        ]
-        try:
-            for i, coro in enumerate(asyncio.as_completed(add_campaign_tasks), start=1):
-                await coro
-                status_update(
-                    _("gui", "status", "adding_campaigns").format(
-                        counter=f"({i}/{len(campaigns)})"
-                    )
-                )
-                # this is needed here explicitly, because cache reads from disk don't raise this
-                if self.gui.close_requested:
-                    raise ExitRequest()
-        except Exception:
-            # asyncio.as_completed doesn't cancel tasks on errors
-            for task in add_campaign_tasks:
-                task.cancel()
-            raise
+        self.gui.inv.publish()
         self._mnt_triggers.extend(sorted(switch_triggers))
         # trim out all triggers that we're already past
         now = datetime.now(timezone.utc)

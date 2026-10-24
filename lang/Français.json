@@ -104,12 +104,14 @@
             "filter": {
                 "name": "Filtre",
                 "show": "Afficher :",
+                "linked": "Lié",
                 "not_linked": "Non lié",
                 "upcoming": "À venir",
                 "expired": "Expiré",
                 "excluded": "Exclu",
                 "finished": "Terminé",
-                "refresh": "Actualiser"
+                "refresh": "Actualiser",
+                "help": "Lié : seulement les campagnes dont le compte du jeu est déjà connecté. Non lié : affiche aussi les campagnes qui doivent encore être liées ; sans cette case, seuls les jeux connectés restent visibles. À venir : campagnes qui n'ont pas commencé. Expiré : campagnes déjà terminées. Exclu : jeux de la liste d'exclusion. Terminé : campagnes dont les drops sont déjà récupérés. Ces cases affichent ou masquent seulement ces groupes. L'ordre reste : d'abord les campagnes en cours (celles qui sont liées au-dessus, celles qui finissent le plus tôt tout en haut), puis celles à venir, puis les expirées."
             },
             "status": {
                 "linked": "Lié ✔",

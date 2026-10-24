@@ -104,12 +104,14 @@
             "filter": {
                 "name": "Filter",
                 "show": "Anzeigen:",
+                "linked": "Verknüpft",
                 "not_linked": "Nicht verbunden",
                 "upcoming": "Zukünftig",
                 "expired": "Abgelaufen",
                 "excluded": "Ausgeschlossen",
                 "finished": "Abgeholt",
-                "refresh": "Aktualisieren"
+                "refresh": "Aktualisieren",
+                "help": "Anzeigen nimmt eine Gruppe auf. Verknüpft und Nicht verbunden zusammen listen jede Kampagne. Zukünftig, Abgelaufen, Ausgeschlossen und Abgeholt holen diese Gruppen dazu. Reihenfolge: zuerst laufende, die am ehesten enden oben, dann zukünftige, dann abgelaufene."
             },
             "status": {
                 "linked": "Verknüpft ✔",
@@ -126,7 +128,15 @@
             "all_channels": "Alle",
             "and_more": "und {amount} weitere...",
             "percent_progress": "{percent} von {minutes} Minuten",
-            "minutes_progress": "{minutes} Minuten"
+            "minutes_progress": "{minutes} Minuten",
+            "farm": "Farmen",
+            "hours_left": "läuft noch {left} Std.",
+            "hours_needed": "Sammeln: {needed} Std.",
+            "days_left": "läuft noch {left} Tage",
+            "days_needed": "Sammeln: {needed} Tage",
+            "starts_in_hours": "startet in {left} Std.",
+            "starts_in_days": "startet in {left} Tagen",
+            "farm_hint": "Ohne Farm-Haken wird jedes gelistete Spiel gefarmt. Ein Haken farmt nur diese Spiele."
         },
         "settings": {
             "general": {
@@ -141,7 +151,33 @@
             "priority": "Priorität",
             "exclude": "Ausschließen",
             "reload": "Neu laden",
-            "reload_text": "Die meisten Änderungen erfordern ein neu laden, um sofort wirksam zu werden: "
+            "reload_text": "Die meisten Änderungen erfordern ein neu laden, um sofort wirksam zu werden: ",
+            "feed_reload": "Drop-Liste aktualisieren",
+            "feed_help": "Lädt die veröffentlichte Liste, welche Spiele gerade Drops haben, und scannt danach nur wenn sich die Liste geändert hat. „Neu laden“ zeichnet nur das Inventar aus den schon gespeicherten Daten neu.",
+            "feed_current": "Die Drop-Liste ist schon aktuell. Es gibt nichts Neues zu scannen.",
+            "feed_status": "{count} Kampagnen in der veröffentlichten Liste · {generated}",
+            "feed_unknown": "Veröffentlichte Drop-Liste: noch nicht geladen",
+            "scan": {
+                "name": "Drop-Scan",
+                "interval": "Nach Drops suchen alle: ",
+                "once": "Die Drop-Liste wird einmal geladen, wenn noch nichts gespeichert ist. Es gibt keinen weiteren Scan nach Zeit. „Jetzt scannen“ holt alle bekannten Drops und zeigt die ganze Liste.",
+                "scan_help": "Fragt die live Kanäle der Spiele, die schon Drops haben. Von selbst passiert das nur, wenn noch nichts gespeichert ist.",
+                "minutes": "Min",
+                "off": "Aus",
+                "scan_now": "Jetzt scannen",
+                "never": "Noch nicht gescannt",
+                "running": "Scan läuft…",
+                "preparing": "Scan wird vorbereitet…",
+                "channels_phase": "Kanäle",
+                "running_progress": "Scannt {done}/{total} · {game} · {campaigns} Kampagnen",
+                "started": "Drop-Scan gestartet. Alle bekannten Kampagnen werden geholt ({count} Spiele).",
+                "partial": "Drop-Scan: {campaigns} Kampagne(n) gefunden, weitere Spiele werden noch geprüft.",
+                "stale": "(veraltet)",
+                "status": "Letzter Scan: {when} UTC · {drops} Spiele mit Drops",
+                "coverage_label": "Geprüfte Spiele: ",
+                "saved": "Das Inventar zeigt diese {campaigns} Spiele.",
+                "coverage": "Geprüft {probed} von {total} Spielen ({percent}) · aus der Liste: {seed} · Kampagnen: {campaigns}"
+            }
         },
         "help": {
             "links": {

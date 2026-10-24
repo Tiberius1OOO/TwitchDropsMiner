@@ -104,12 +104,14 @@
             "filter": {
                 "name": "Filtro de campañas",
                 "show": "Mostrar:",
+                "linked": "Enlazado",
                 "not_linked": "No enlazado",
                 "upcoming": "Próximas",
                 "expired": "Expiradas",
                 "excluded": "Excluidas",
                 "finished": "Completadas",
-                "refresh": "Actualizar"
+                "refresh": "Actualizar",
+                "help": "Enlazado: solo campañas cuya cuenta del juego ya está conectada. No enlazado: muestra también campañas que aún necesitan esa conexión; sin esta casilla solo quedan los juegos conectados. Próximas: campañas que no han empezado. Expiradas: campañas que ya terminaron. Excluidas: juegos de la lista de exclusión. Completadas: campañas cuyos drops ya se reclamaron. Las casillas solo muestran u ocultan esos grupos. El orden no cambia: primero las campañas en curso (las conectadas arriba, las que terminan antes del todo), luego las próximas y después las expiradas."
             },
             "status": {
                 "linked": "Vinculado ✔",

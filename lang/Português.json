@@ -104,12 +104,14 @@
             "filter": {
                 "name": "Filtro",
                 "show": "Mostrar:",
+                "linked": "Ligado",
                 "not_linked": "Não ligado",
                 "upcoming": "Se Aproximando",
                 "expired": "Expirado",
                 "excluded": "Excluido",
                 "finished": "Finalizado",
-                "refresh": "Atualizar"
+                "refresh": "Atualizar",
+                "help": "Ligado: só campanhas cuja conta do jogo já está ligada. Não ligado: mostra também campanhas que ainda precisam dessa ligação; sem esta caixa ficam só os jogos ligados. Se Aproximando: campanhas que ainda não começaram. Expirado: campanhas que já terminaram. Excluido: jogos da lista de exclusão. Finalizado: campanhas cujos drops já foram recolhidos. As caixas só mostram ou escondem esses grupos. A ordem fica: primeiro as campanhas a decorrer (as ligadas em cima, as que acabam mais cedo no topo), depois as que se aproximam e depois as expiradas."
             },
             "status": {
                 "linked": "Conectado \u2714",

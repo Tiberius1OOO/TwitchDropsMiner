@@ -104,12 +104,14 @@
             "filter": {
                 "name": "Filtre",
                 "show": "Göster:",
+                "linked": "Bağlı",
                 "not_linked": "Bağlı değil",
                 "upcoming": "Yaklaşan",
                 "expired": "Süresi Doldu",
                 "excluded": "Hariç Tutulan",
                 "finished": "Tamamlandı",
-                "refresh": "Yenile"
+                "refresh": "Yenile",
+                "help": "Bağlı: yalnızca oyun hesabı zaten bağlanmış kampanyalar. Bağlı değil: bağlantısı eksik kampanyaları da gösterir; bu kutu kapalıyken yalnızca bağlı oyunlar görünür. Yaklaşan: henüz başlamamış kampanyalar. Süresi Doldu: bitmiş kampanyalar. Hariç Tutulan: hariç listesindeki oyunlar. Tamamlandı: dropları zaten alınmış kampanyalar. Kutular yalnızca bu grupları gösterir veya gizler. Sıra değişmez: önce süren kampanyalar (bağlı olanlar üstte, en erken biten en üstte), sonra yaklaşanlar, sonra süresi dolanlar."
             },
             "status": {
                 "linked": "Bağlı ✔",

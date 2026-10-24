@@ -104,12 +104,14 @@
       "filter": {
         "name": "Filter",
         "show": "Vis:",
+        "linked": "Koblet",
         "not_linked": "Ikke koblet",
         "upcoming": "Kommende",
         "expired": "Utløpt",
         "excluded": "Ekskludert",
         "finished": "Fullført",
-        "refresh": "Oppdater"
+        "refresh": "Oppdater",
+        "help": "Koblet: bare kampanjer der spillkontoen allerede er koblet. Ikke koblet: vis også kampanjer som fortsatt mangler koblingen; uten haken vises bare koblede spill. Kommende: kampanjer som ikke har startet. Utløpt: kampanjer som er ferdige. Ekskludert: spill fra utelatelseslisten. Fullført: kampanjer der drops allerede er hentet. Hakene viser eller skjuler bare grupper. Rekkefølgen blir: først pågående kampanjer (koblede øverst, de som slutter først helt øverst), deretter kommende, deretter utløpte."
       },
       "status": {
         "linked": "Koblet ✔",

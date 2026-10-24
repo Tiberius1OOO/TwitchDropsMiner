@@ -104,12 +104,14 @@
             "filter": {
                 "name": "Filtr",
                 "show": "Pokaż:",
+                "linked": "Połączone",
                 "not_linked": "Niepołączone",
                 "upcoming": "Nadchodzące",
                 "expired": "Wygasłe",
                 "excluded": "Wykluczone",
                 "finished": "Ukończone",
-                "refresh": "Odśwież"
+                "refresh": "Odśwież",
+                "help": "Połączone: tylko kampanie, których konto gry jest już połączone. Niepołączone: pokazuje też kampanie, które nadal wymagają połączenia; bez tego ptaszka zostają tylko połączone gry. Nadchodzące: kampanie, które jeszcze się nie zaczęły. Wygasłe: kampanie, które już się skończyły. Wykluczone: gry z listy wykluczeń. Ukończone: kampanie, których dropy są już odebrane. Ptaszki tylko pokazują albo ukrywają te grupy. Kolejność zostaje: najpierw trwające kampanie (połączone wyżej, te kończące się najszybciej na samej górze), potem nadchodzące, potem wygasłe."
             },
             "status": {
                 "linked": "Połączono ✔",

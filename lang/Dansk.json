@@ -104,12 +104,14 @@
             "filter": {
                 "name": "Filter",
                 "show": "Vis:",
+                "linked": "Forbundet",
                 "not_linked": "Ikke forbundet",
                 "upcoming": "Kommende",
                 "expired": "Udløbet",
                 "excluded": "Udelukket",
                 "finished": "Færdig",
-                "refresh": "Opdater"
+                "refresh": "Opdater",
+                "help": "Forbundet: kun kampagner, hvis spilkonto allerede er forbundet. Ikke forbundet: vis også kampagner, der stadig mangler forbindelsen; uden flueben vises kun forbundne spil. Kommende: kampagner, der ikke er startet. Udløbet: kampagner, der er slut. Udelukket: spil fra udelukkelseslisten. Færdig: kampagner, hvis drops allerede er hentet. Fluebenene viser eller skjuler kun grupper. Rækkefølgen bliver: først kørende kampagner (forbundne øverst, dem der slutter først helt øverst), derefter kommende, derefter udløbne."
             },
             "status": {
                 "linked": "Forbundet \u2714",

@@ -93,33 +93,44 @@ class ImageCache:
         return ImageHash(f"{int(bits, 2):x}.png")
 
     async def get(self, url: URLType, size: ImageSize | None = None) -> PhotoImage:
+        image: Image | None = None
+        img_hash: ImageHash | None = None
         async with self._lock:
-            image: Image | None = None
             if url in self._hashes:
                 img_hash = self._hashes[url]["hash"]
                 self._hashes[url]["expires"] = self._new_expires()
-                if img_hash in self._images:
-                    image = self._images[img_hash]
-                else:
+                image = self._images.get(img_hash)
+                if image is None:
                     try:
                         loaded = Image_module.open(CACHE_PATH / img_hash)
                         loaded.load()  # force full decode so broken data is caught here
                         self._images[img_hash] = image = loaded
                     except (FileNotFoundError, Image_module.UnidentifiedImageError, OSError):
-                        pass
+                        image = None
+                        img_hash = None
+        if image is None:
+            # The download stays outside the lock, so one slow image does not
+            # hold up every other card.
+            try:
+                async with self._twitch.request("GET", url) as response:
+                    if response.status != 404:
+                        image = Image_module.open(io.BytesIO(await response.read()))
+                        image.load()
+            except Exception:
+                image = None
             if image is None:
-                try:
-                    async with self._twitch.request("GET", url) as response:
-                        if response.status != 404:
-                            image = Image_module.open(io.BytesIO(await response.read()))
-                except Exception:
-                    pass
-                if image is None:
-                    # use a blank white image as a fallback
-                    image = Image_module.new("RGB", (10, 10), (255, 255, 255))
+                image = Image_module.new("RGB", (10, 10), (255, 255, 255))
+            try:
                 img_hash = self._hash(image)
+            except OSError:
+                image = Image_module.new("RGB", (10, 10), (255, 255, 255))
+                img_hash = self._hash(image)
+            async with self._lock:
                 self._images[img_hash] = image
-                image.save(CACHE_PATH / img_hash)
+                try:
+                    image.save(CACHE_PATH / img_hash)
+                except OSError:
+                    pass
                 self._hashes[url] = {
                     "hash": img_hash,
                     "expires": self._new_expires()

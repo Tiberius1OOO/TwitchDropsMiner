@@ -104,12 +104,14 @@
             "filter": {
                 "name": "Filtru",
                 "show": "Arată :",
+                "linked": "Conectat",
                 "not_linked": "Neconectat",
                 "upcoming": "În viitor",
                 "expired": "Expirat",
                 "excluded": "Exclus",
                 "finished": "Terminat",
-                "refresh": "Actualizare"
+                "refresh": "Actualizare",
+                "help": "Conectat: doar campaniile al căror cont de joc este deja conectat. Neconectat: arată și campaniile care încă trebuie conectate; fără această bifă rămân doar jocurile conectate. În viitor: campanii care nu au început. Expirat: campanii deja încheiate. Exclus: jocuri din lista de excludere. Terminat: campanii ale căror dropuri sunt deja revendicate. Bifurile doar arată sau ascund aceste grupuri. Ordinea rămâne: mai întâi campaniile în curs (cele conectate deasupra, cele care se termină cel mai curând sus de tot), apoi cele viitoare, apoi cele expirate."
             },
             "status": {
                 "linked": "Conectat ✔",

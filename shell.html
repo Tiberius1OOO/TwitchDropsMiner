@@ -1,0 +1,684 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Twitch Drops Miner</title>
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: #1b1e26;
+    --bar: #151820;
+    --row: #22262f;
+    --line: #343a46;
+    --text: #e7e9ee;
+    --muted: #9aa3b2;
+    --green: #3dd68c;
+    --gold: #e0b15a;
+    --red: #e06c6c;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
+    font: 13px/1.35 "Segoe UI", sans-serif; }
+  button, input, select { font: inherit; color: inherit; }
+  body { display: flex; flex-direction: column; }
+  header.top { height: 48px; flex: none; display: flex; align-items: center; gap: 18px;
+    padding: 0 16px; background: var(--bar); border-bottom: 1px solid var(--line); }
+  .brand { font-weight: 650; letter-spacing: 0.01em; }
+  nav { display: flex; gap: 4px; height: 100%; }
+  nav button, .tray {
+    background: transparent; border: 0; color: var(--muted); padding: 0 12px; height: 100%;
+    border-bottom: 2px solid transparent; cursor: pointer; }
+  nav button.on { color: var(--text); border-bottom-color: var(--green); }
+  .tray { margin-left: auto; height: 28px; border: 1px solid var(--line); background: var(--row); color: var(--text); }
+  #statusline { flex: none; min-height: 28px; display: flex; align-items: center; gap: 12px;
+    padding: 4px 16px; color: var(--muted); border-bottom: 1px solid var(--line); background: var(--bar); }
+  #load { flex: none; height: 3px; background: #12141a; }
+  #load > div { height: 100%; width: 0; background: var(--green); }
+  #views { flex: 1; min-height: 0; }
+  .view { display: none; height: 100%; }
+  .view.on { display: flex; flex-direction: column; }
+  .scroll { flex: 1; min-height: 0; overflow: auto; }
+  .block { border-bottom: 1px solid var(--line); background: var(--row); padding: 10px 16px; }
+  .kicker { color: var(--muted); font-size: 12px; }
+  .title { font-weight: 650; }
+  .bars { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 8px; }
+  .track { height: 8px; background: #12141a; border: 1px solid var(--line); margin-top: 4px; overflow: hidden; }
+  .track > div { height: 100%; width: 0; background: var(--green); position: relative; overflow: hidden;
+    transition: width 0.8s ease; }
+  .track > div.live::after, #load > div.live::after {
+    content: ""; position: absolute; top: 0; bottom: 0; width: 38%;
+    background: linear-gradient(90deg, transparent, rgba(255,255,255,0.42), transparent);
+    animation: sweep 1.5s ease-in-out infinite;
+  }
+  @keyframes sweep { from { left: -40%; } to { left: 110%; } }
+  #load { position: relative; overflow: hidden; }
+  #load > div { position: relative; height: 100%; background: var(--green); transition: width 0.6s ease; }
+  .meta { color: var(--muted); margin-top: 3px; }
+  .login { display: none; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .login.on { display: flex; }
+  input[type="text"], input[type="password"], select {
+    background: #12141a; border: 1px solid var(--line); padding: 5px 8px; min-width: 160px; }
+  button.go, button.small {
+    background: var(--row); border: 1px solid var(--line); padding: 5px 10px; cursor: pointer; }
+  button.go { color: var(--text); }
+  .chan { height: 40px; display: grid; grid-template-columns: minmax(140px, 1.2fr) 120px minmax(120px, 1fr) 64px 64px 72px;
+    align-items: center; gap: 8px; padding: 0 16px; border-bottom: 1px solid var(--line); background: var(--row); cursor: pointer; }
+  .chan.watch { box-shadow: inset 3px 0 0 var(--green); }
+  .chan.head { height: 28px; color: var(--muted); cursor: default; background: var(--bar); }
+  .chan .ok { color: var(--green); }
+  .chan .no { color: var(--red); }
+  #log { margin: 0; padding: 8px 16px 16px; color: var(--muted); white-space: pre-wrap;
+    font: 12px/1.45 Consolas, "Cascadia Mono", monospace; }
+  .tools { display: flex; align-items: center; gap: 14px; padding: 0 16px; height: 44px; flex: none;
+    background: var(--bar); border-bottom: 1px solid var(--line); color: var(--muted); }
+  label.opt { display: inline-flex; align-items: center; gap: 6px; color: var(--text); }
+  input[type="checkbox"] { width: 15px; height: 15px; margin: 0; accent-color: #4c8dff; }
+  #viewport { flex: 1; min-height: 0; overflow-y: auto; position: relative; }
+  #spacer { width: 1px; }
+  #rows { position: absolute; left: 0; right: 0; top: 0; }
+  .row { height: 96px; display: grid; grid-template-columns: 78px 84px minmax(220px, 1fr) 88px minmax(180px, 42%);
+    align-items: center; column-gap: 8px; padding: 0 12px 0 8px;
+    border-bottom: 1px solid var(--line); background: var(--row); }
+  .farm { display: flex; align-items: center; gap: 6px; }
+  .cover, .tile img { width: 64px; height: 84px; object-fit: cover; background: #12141a; border: 1px solid var(--line); }
+  .tile img { width: 56px; height: 56px; }
+  .row .title { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .status { font-weight: 650; }
+  .status.active, .side.active { color: var(--green); }
+  .status.upcoming, .side.upcoming { color: var(--gold); }
+  .status.expired, .side.expired { color: var(--red); }
+  .time { color: var(--muted); margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .side { text-align: right; font-weight: 650; }
+  .rewards { display: flex; align-items: flex-start; gap: 8px; height: 84px; overflow: hidden; }
+  .tile { width: 72px; flex: 0 0 72px; text-align: center; }
+  .tile span, .more span { display: block; margin-top: 3px; font-size: 11px; color: var(--muted);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .tile.claimed img { filter: grayscale(0.85); opacity: 0.55; }
+  .more { width: 56px; height: 56px; display: flex; align-items: center; justify-content: center;
+    font-weight: 650; background: #2a303b; border: 1px solid var(--line); }
+  #empty { position: absolute; inset: 0; display: none; align-items: center; justify-content: center; color: var(--muted); }
+  #scan-note { padding: 0 16px 10px; background: var(--row); border-bottom: 1px solid var(--line); }
+  .set { min-height: 44px; display: grid; grid-template-columns: 280px 1fr; align-items: center;
+    gap: 8px 12px; padding: 8px 16px; border-bottom: 1px solid var(--line); background: var(--row); }
+  .set .hint { grid-column: 1 / -1; color: var(--muted); white-space: pre-wrap; }
+  .set.tall { height: auto; align-items: start; padding: 10px 16px; }
+  .games { display: flex; flex-wrap: wrap; gap: 6px; }
+  .chip { display: inline-flex; align-items: center; gap: 6px; background: #12141a; border: 1px solid var(--line); padding: 3px 6px; }
+  .chip button { background: transparent; border: 0; color: var(--muted); cursor: pointer; padding: 0 2px; }
+  .help p { margin: 6px 0; white-space: pre-wrap; }
+  a { color: #8eb6ff; }
+  .section { color: var(--muted); padding: 14px 16px 4px; background: var(--bg); font-weight: 650; }
+  .section-note { color: var(--muted); padding: 4px 16px 14px; background: var(--bg);
+    border-bottom: 1px solid var(--line); white-space: pre-wrap; }
+</style>
+</head>
+<body>
+<header class="top">
+  <span class="brand">Twitch Drops Miner</span>
+  <nav>
+    <button type="button" class="tab on" data-tab="main"></button>
+    <button type="button" class="tab" data-tab="inventory"></button>
+    <button type="button" class="tab" data-tab="settings"></button>
+    <button type="button" class="tab" data-tab="help"></button>
+  </nav>
+  <button type="button" class="tray" id="tray"></button>
+</header>
+<div id="statusline"></div>
+<div id="load" hidden><div></div></div>
+<div id="views">
+  <section class="view on" id="view-main">
+    <div class="block">
+      <div class="login" id="login">
+        <input id="user" type="text" autocomplete="username">
+        <input id="pass" type="password" autocomplete="current-password">
+        <input id="twofa" type="text" autocomplete="one-time-code">
+        <button type="button" class="go" id="login-go"></button>
+      </div>
+      <div class="kicker" id="drop-kicker"></div>
+      <div class="title" id="drop-title"></div>
+      <div class="bars">
+        <div>
+          <div class="kicker" id="camp-label"></div>
+          <div class="track"><div id="camp-bar"></div></div>
+          <div class="meta" id="camp-meta"></div>
+        </div>
+        <div>
+          <div class="kicker" id="drop-label"></div>
+          <div class="track"><div id="drop-bar"></div></div>
+          <div class="meta" id="drop-meta"></div>
+        </div>
+      </div>
+    </div>
+    <div class="tools">
+      <span id="chan-name"></span>
+      <button type="button" class="go" id="switch"></button>
+      <span id="sockets"></span>
+    </div>
+    <div class="scroll" id="channels"></div>
+    <div class="section" id="log-name"></div>
+    <pre id="log"></pre>
+  </section>
+  <section class="view" id="view-inventory">
+    <div class="tools" id="filters"></div>
+    <div id="viewport">
+      <div id="spacer"></div>
+      <div id="rows"></div>
+      <div id="empty"></div>
+    </div>
+  </section>
+  <section class="view" id="view-settings">
+    <div class="scroll" id="settings"></div>
+  </section>
+  <section class="view" id="view-help">
+    <div class="scroll help" id="help"></div>
+  </section>
+</div>
+<script>
+const TOKEN = "__TOKEN__";
+const I18N = __LABELS__;
+const ROW = 96;
+document.querySelectorAll("nav .tab").forEach((button) => {
+  button.textContent = I18N.tabs[button.dataset.tab];
+  button.addEventListener("click", () => showTab(button.dataset.tab));
+});
+document.getElementById("tray").textContent = I18N.tray;
+document.getElementById("user").placeholder = I18N.username;
+document.getElementById("pass").placeholder = I18N.password;
+document.getElementById("twofa").placeholder = I18N.twofa;
+document.getElementById("login-go").textContent = I18N.loginButton;
+document.getElementById("switch").textContent = I18N.switchLabel;
+document.getElementById("chan-name").textContent = I18N.channels;
+document.getElementById("log-name").textContent = I18N.output;
+document.getElementById("empty").textContent = I18N.empty;
+
+function showTab(name) {
+  document.querySelectorAll(".tab").forEach((button) => button.classList.toggle("on", button.dataset.tab === name));
+  document.querySelectorAll(".view").forEach((view) => view.classList.toggle("on", view.id === "view-" + name));
+  if (name === "inventory") paint();
+}
+
+async function post(op, extra) {
+  const response = await fetch("/api/action?token=" + TOKEN, {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify(Object.assign({op: op}, extra || {})),
+  });
+  if (!response.ok) throw new Error(String(response.status));
+}
+
+document.getElementById("tray").addEventListener("click", () => post("tray").catch(() => {}));
+document.getElementById("login-go").addEventListener("click", () => {
+  post("login", {
+    username: document.getElementById("user").value,
+    password: document.getElementById("pass").value,
+    token: document.getElementById("twofa").value,
+  }).catch(() => {});
+});
+document.getElementById("switch").addEventListener("click", () => post("switch").catch(() => {}));
+
+const filtersHost = document.getElementById("filters");
+filtersHost.append(document.createTextNode(I18N.show + " "));
+const filterIds = ["linked", "not", "upcoming", "expired", "excluded", "finished"];
+const filterDefaults = {linked: true, not: true, upcoming: true, expired: false, excluded: false, finished: false};
+const filters = {};
+filterIds.forEach((id) => {
+  const label = document.createElement("label");
+  label.className = "opt";
+  const box = document.createElement("input");
+  box.type = "checkbox";
+  box.checked = filterDefaults[id];
+  box.addEventListener("change", () => { painted = ""; paint(); });
+  filters[id] = box;
+  label.append(box, document.createTextNode(" " + I18N.filters[id]));
+  filtersHost.append(label);
+});
+
+const viewport = document.getElementById("viewport");
+const spacer = document.getElementById("spacer");
+const rows = document.getElementById("rows");
+const empty = document.getElementById("empty");
+let campaigns = [];
+let shown = [];
+let revision = "";
+let painted = "";
+
+function matches(row) {
+  if (!row.watchable) return false;
+  const linkOk = (filters.linked.checked && row.linked) || (filters.not.checked && !row.linked);
+  if (!linkOk) return false;
+  const visible = row.status === "active"
+    || (filters.upcoming.checked && row.status === "upcoming")
+    || (filters.expired.checked && row.status === "expired");
+  if (!visible) return false;
+  if (row.excluded && !filters.excluded.checked) return false;
+  if (row.finished && !filters.finished.checked) return false;
+  return true;
+}
+
+function tile(reward) {
+  const node = document.createElement("div");
+  node.className = "tile" + (reward.claimed ? " claimed" : "");
+  const img = document.createElement("img");
+  img.alt = "";
+  img.width = 56;
+  img.height = 56;
+  if (reward.image) img.src = reward.image;
+  const name = document.createElement("span");
+  name.textContent = reward.name;
+  node.title = reward.detail || reward.name;
+  node.append(img, name);
+  return node;
+}
+
+function rewardsColumn() {
+  return Math.max(160, Math.floor(viewport.clientWidth * 0.42) - 16);
+}
+
+function rowEl(row) {
+  const el = document.createElement("div");
+  el.className = "row";
+  const farm = document.createElement("label");
+  farm.className = "farm";
+  const box = document.createElement("input");
+  box.type = "checkbox";
+  box.checked = row.farm;
+  box.addEventListener("change", () => {
+    fetch("/api/farm?token=" + TOKEN, {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({game: row.game, on: box.checked}),
+    }).then((response) => {
+      if (!response.ok) box.checked = !box.checked;
+    }).catch(() => { box.checked = !box.checked; });
+  });
+  farm.append(box, document.createTextNode(I18N.farm));
+  const cover = document.createElement("img");
+  cover.className = "cover";
+  cover.alt = "";
+  cover.width = 64;
+  cover.height = 84;
+  if (row.art) cover.src = row.art;
+  const text = document.createElement("div");
+  const title = document.createElement("div");
+  title.className = "title";
+  title.textContent = row.game + " - " + row.name;
+  const status = document.createElement("div");
+  status.className = "status " + row.status;
+  status.textContent = row.statusLabel;
+  const time = document.createElement("div");
+  time.className = "time";
+  time.textContent = row.time;
+  text.append(title, status, time);
+  const side = document.createElement("div");
+  side.className = "side " + row.status;
+  side.textContent = row.statusLabel;
+  const rewards = document.createElement("div");
+  rewards.className = "rewards";
+  const width = rewardsColumn();
+  const slots = Math.max(1, Math.floor(width / 80));
+  const count = row.rewards.length > slots ? Math.max(1, slots - 1) : row.rewards.length;
+  const hidden = row.rewards.length - count;
+  row.rewards.slice(0, count).forEach((reward) => rewards.appendChild(tile(reward)));
+  if (hidden > 0) {
+    const more = document.createElement("div");
+    more.className = "more";
+    more.textContent = "+" + hidden;
+    rewards.appendChild(more);
+  }
+  el.append(farm, cover, text, side, rewards);
+  return el;
+}
+
+function paint() {
+  if (!document.getElementById("view-inventory").classList.contains("on")) return;
+  shown = campaigns.filter(matches);
+  const start = Math.max(0, Math.floor(viewport.scrollTop / ROW) - 2);
+  const key = revision + "|" + start + "|" + shown.map((row) => row.id).join(",")
+    + "|" + shown.map((row) => row.farm + row.time + row.status).join(",")
+    + "|" + viewport.clientWidth;
+  if (key === painted && rows.childElementCount) return;
+  painted = key;
+  spacer.style.height = (shown.length * ROW) + "px";
+  empty.style.display = shown.length ? "none" : "flex";
+  const end = Math.min(shown.length, start + Math.ceil(viewport.clientHeight / ROW) + 4);
+  rows.style.transform = "translateY(" + (start * ROW) + "px)";
+  rows.replaceChildren();
+  for (let i = start; i < end; i++) rows.appendChild(rowEl(shown[i]));
+}
+viewport.addEventListener("scroll", paint);
+window.addEventListener("resize", () => { painted = ""; paint(); });
+
+function bar(id, value) {
+  const node = document.getElementById(id);
+  const amount = Math.max(0, Math.min(1, Number(value) || 0));
+  node.style.width = (amount * 100) + "%";
+  node.classList.toggle("live", amount > 0.01 && amount < 0.995);
+}
+
+function mark(value) {
+  const span = document.createElement("span");
+  span.className = value === "✔" ? "ok" : "no";
+  span.textContent = value || "";
+  return span;
+}
+
+function renderChannels(list) {
+  const host = document.getElementById("channels");
+  const head = document.createElement("div");
+  head.className = "chan head";
+  [I18N.headChannel, I18N.headStatus, I18N.headGame, I18N.headDrops, I18N.headFarm, I18N.headViewers]
+    .forEach((text) => {
+      const cell = document.createElement("span");
+      cell.textContent = text;
+      head.append(cell);
+    });
+  const body = [head];
+  (list || []).forEach((channel) => {
+    const row = document.createElement("div");
+    row.className = "chan" + (channel.watching ? " watch" : "");
+    const name = document.createElement("span");
+    name.className = "title";
+    name.textContent = channel.name;
+    const status = document.createElement("span");
+    status.textContent = channel.status;
+    const game = document.createElement("span");
+    game.textContent = channel.game;
+    const viewers = document.createElement("span");
+    viewers.textContent = channel.viewers;
+    row.append(name, status, game, mark(channel.drops), mark(channel.earn), viewers);
+    row.addEventListener("click", () => post("channel", {id: channel.id}).catch(() => {}));
+    body.push(row);
+  });
+  host.replaceChildren(...body);
+}
+
+function chip(text, onRemove, onUp, onDown) {
+  const node = document.createElement("span");
+  node.className = "chip";
+  node.append(document.createTextNode(text));
+  if (onUp) {
+    const up = document.createElement("button");
+    up.type = "button";
+    up.textContent = "↑";
+    up.addEventListener("click", onUp);
+    node.append(up);
+  }
+  if (onDown) {
+    const down = document.createElement("button");
+    down.type = "button";
+    down.textContent = "↓";
+    down.addEventListener("click", onDown);
+    node.append(down);
+  }
+  const remove = document.createElement("button");
+  remove.type = "button";
+  remove.textContent = "×";
+  remove.addEventListener("click", onRemove);
+  node.append(remove);
+  return node;
+}
+
+function settingRow(label, control, hint) {
+  const row = document.createElement("div");
+  row.className = "set" + (hint ? " tall" : "");
+  const name = document.createElement("div");
+  name.textContent = label;
+  row.append(name, control);
+  if (hint) {
+    const note = document.createElement("div");
+    note.className = "hint";
+    note.textContent = hint;
+    row.append(note);
+  }
+  return row;
+}
+
+function check(on, key) {
+  const box = document.createElement("input");
+  box.type = "checkbox";
+  box.checked = !!on;
+  box.addEventListener("change", () => post("setting", {key: key, value: box.checked}).catch(() => { box.checked = !box.checked; }));
+  return box;
+}
+
+function select(options, current, key) {
+  const node = document.createElement("select");
+  options.forEach((option) => {
+    const item = document.createElement("option");
+    item.value = option.value;
+    item.textContent = option.label;
+    if (option.value === current || option.label === current) item.selected = true;
+    node.append(item);
+  });
+  node.addEventListener("change", () => post("setting", {key: key, value: node.value}).catch(() => {}));
+  return node;
+}
+
+let settingsPaint = "";
+function renderSettings(state) {
+  const s = state.settings || {};
+  const key = JSON.stringify({
+    language: s.language, autostart: s.autostart, tray: s.tray, notifications: s.notifications,
+    mode: s.mode, proxy: s.proxy, priority: s.priority, exclude: s.exclude,
+    badges: s.badges, dropsCheck: s.dropsCheck, languages: s.languages, modes: s.modes,
+    games: s.games,
+  });
+  const note = [s.scanStatus, s.scanDetail, s.feedStatus].filter(Boolean).join(" · ");
+  const existing = document.getElementById("scan-note");
+  if (existing) existing.textContent = note;
+  if (key === settingsPaint) return;
+  settingsPaint = key;
+  const host = document.getElementById("settings");
+  const games = document.createElement("div");
+  games.className = "games";
+  (s.priority || []).forEach((game) => games.append(chip(
+    game,
+    () => post("priority-delete", {game: game}).catch(() => {}),
+    () => post("priority-up", {game: game}).catch(() => {}),
+    () => post("priority-down", {game: game}).catch(() => {}),
+  )));
+  const add = document.createElement("input");
+  add.type = "text";
+  add.placeholder = I18N.gameName;
+  add.setAttribute("list", "game-names");
+  const addButton = document.createElement("button");
+  addButton.type = "button";
+  addButton.className = "small";
+  addButton.textContent = "+";
+  addButton.addEventListener("click", () => {
+    const game = add.value.trim();
+    if (!game) return;
+    post("priority-add", {game: game}).then(() => { add.value = ""; }).catch(() => {});
+  });
+  const priority = document.createElement("div");
+  priority.append(games, add, addButton);
+  const excluded = document.createElement("div");
+  excluded.className = "games";
+  (s.exclude || []).forEach((game) => excluded.append(chip(
+    game,
+    () => post("exclude-delete", {game: game}).catch(() => {}),
+  )));
+  const exAdd = document.createElement("input");
+  exAdd.type = "text";
+  exAdd.placeholder = I18N.gameName;
+  exAdd.setAttribute("list", "game-names");
+  const exButton = document.createElement("button");
+  exButton.type = "button";
+  exButton.className = "small";
+  exButton.textContent = "+";
+  exButton.addEventListener("click", () => {
+    const game = exAdd.value.trim();
+    if (!game) return;
+    post("exclude-add", {game: game}).then(() => { exAdd.value = ""; }).catch(() => {});
+  });
+  const excludeBox = document.createElement("div");
+  excludeBox.append(excluded, exAdd, exButton);
+  const list = document.createElement("datalist");
+  list.id = "game-names";
+  (s.games || []).forEach((game) => {
+    const option = document.createElement("option");
+    option.value = game;
+    list.append(option);
+  });
+  const proxy = document.createElement("input");
+  proxy.type = "text";
+  proxy.value = s.proxy || "";
+  proxy.addEventListener("change", () => post("setting", {key: "proxy", value: proxy.value}).catch(() => {}));
+  const scan = document.createElement("div");
+  const scanNow = document.createElement("button");
+  scanNow.type = "button";
+  scanNow.className = "small";
+  scanNow.textContent = I18N.scanNow;
+  scanNow.addEventListener("click", () => post("scan").catch(() => {}));
+  const feed = document.createElement("button");
+  feed.type = "button";
+  feed.className = "small";
+  feed.textContent = I18N.feed;
+  feed.addEventListener("click", () => post("feed").catch(() => {}));
+  const reload = document.createElement("button");
+  reload.type = "button";
+  reload.className = "small";
+  reload.textContent = I18N.reload;
+  reload.addEventListener("click", () => post("reload").catch(() => {}));
+  scan.append(scanNow, document.createTextNode(" "), feed, document.createTextNode(" "), reload);
+  const scanNote = document.createElement("div");
+  scanNote.id = "scan-note";
+  scanNote.className = "hint";
+  scanNote.textContent = note;
+  function heading(text) {
+    const node = document.createElement("div");
+    node.className = "section";
+    node.textContent = text;
+    return node;
+  }
+  function noteBlock(text) {
+    const node = document.createElement("div");
+    node.className = "section-note";
+    node.textContent = text;
+    return node;
+  }
+  const dropsNote = document.createElement("div");
+  dropsNote.className = "section-note";
+  const helpLine = document.createElement("div");
+  helpLine.textContent = I18N.scanHelp;
+  dropsNote.append(scanNote, helpLine);
+  host.replaceChildren(
+    heading(I18N.generalName),
+    settingRow(I18N.language, select(s.languages.map((item) => ({value: item, label: item})), s.language, "language")),
+    settingRow(I18N.autostart, check(s.autostart, "autostart")),
+    settingRow(I18N.trayStart, check(s.tray, "tray")),
+    settingRow(I18N.notifications, check(s.notifications, "notifications")),
+    noteBlock(I18N.restart),
+    heading(I18N.gamesName),
+    settingRow(I18N.mode, select(s.modes, s.mode, "mode")),
+    settingRow(I18N.priority, priority),
+    settingRow(I18N.exclude, excludeBox),
+    noteBlock(I18N.gamesNote),
+    heading(I18N.scan),
+    settingRow(I18N.scan, scan),
+    dropsNote,
+    heading(I18N.connectionName),
+    settingRow(I18N.proxy, proxy),
+    noteBlock(I18N.proxyRestart),
+    heading(I18N.advancedName),
+    noteBlock(I18N.advanced),
+    settingRow(I18N.badges, check(s.badges, "badges")),
+    settingRow(I18N.dropsCheck, check(s.dropsCheck, "drops_check")),
+    list,
+  );
+}
+
+function renderHelp() {
+  const host = document.getElementById("help");
+  if (host.childElementCount) return;
+  function block(title, text) {
+    const node = document.createElement("div");
+    node.className = "block";
+    const heading = document.createElement("div");
+    heading.className = "title";
+    heading.textContent = title;
+    const body = document.createElement("p");
+    body.textContent = text;
+    node.append(heading, body);
+    return node;
+  }
+  function link(href, text) {
+    const anchor = document.createElement("a");
+    anchor.href = href;
+    anchor.target = "_blank";
+    anchor.rel = "noreferrer";
+    anchor.textContent = text;
+    return anchor;
+  }
+  const about = block(I18N.about, "");
+  about.append(document.createTextNode(I18N.created), link("https://github.com/DevilXD", "DevilXD"), document.createElement("br"),
+    document.createTextNode(I18N.modified), link("https://github.com/Tiberius1OOO/TwitchDropsMiner", "Tiberia"));
+  const links = block(I18N.links, "");
+  links.append(link("https://www.twitch.tv/drops/inventory", I18N.linkInventory), document.createElement("br"),
+    link("https://www.twitch.tv/drops/campaigns", I18N.linkCampaigns));
+  const logout = document.createElement("div");
+  logout.className = "block";
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "go";
+  button.textContent = I18N.invalidate;
+  button.addEventListener("click", () => post("invalidate").catch(() => {}));
+  logout.append(document.createTextNode(I18N.invalidateText + " "), button);
+  host.append(
+    about,
+    links,
+    block(I18N.how, I18N.howText),
+    block(I18N.start, I18N.startText),
+    block(I18N.channelHelp, I18N.channelHelpText),
+    logout,
+  );
+}
+renderHelp();
+
+function apply(state) {
+  document.getElementById("statusline").textContent = state.status || "";
+  const load = document.getElementById("load");
+  if (state.scan && state.scan.running && state.scan.total > 0) {
+    load.hidden = false;
+    const fill = load.firstElementChild;
+    const amount = Math.min(1, state.scan.done / state.scan.total);
+    fill.style.width = (amount * 100) + "%";
+    fill.classList.toggle("live", amount > 0.01 && amount < 0.995);
+  } else {
+    load.hidden = true;
+  }
+  document.getElementById("login").classList.toggle("on", !!state.loginReady);
+  const drop = state.drop || {};
+  document.getElementById("drop-kicker").textContent = drop.game && drop.game !== "..." ? drop.game : I18N.progress;
+  document.getElementById("drop-title").textContent = drop.campaign && drop.campaign !== "..." ? drop.campaign : "";
+  document.getElementById("camp-label").textContent = drop.campaignLabel || I18N.campaignProgress;
+  document.getElementById("drop-label").textContent = drop.rewards && drop.rewards !== "..." ? drop.rewards : I18N.dropProgress;
+  document.getElementById("camp-meta").textContent = drop.campaignRemaining || "";
+  document.getElementById("drop-meta").textContent = drop.dropRemaining || "";
+  bar("camp-bar", drop.campaignProgress);
+  bar("drop-bar", drop.dropProgress);
+  const sockets = (state.sockets || []).map((item) => "#" + item.id + " " + item.status + " " + item.topics).join("   ");
+  document.getElementById("sockets").textContent = sockets;
+  renderChannels(state.channels);
+  document.getElementById("log").textContent = (state.log || []).join("\n");
+  if (state.revision !== revision) {
+    revision = state.revision;
+    campaigns = state.campaigns || [];
+    painted = "";
+  }
+  paint();
+  renderSettings(state);
+}
+
+async function tick() {
+  try {
+    const response = await fetch("/api/state?token=" + TOKEN);
+    if (!response.ok) return;
+    apply(await response.json());
+  } catch (error) {}
+}
+tick();
+setInterval(tick, 1000);
+</script>
+</body>
+</html>

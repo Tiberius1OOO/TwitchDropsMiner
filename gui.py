@@ -34,6 +34,7 @@ if sys.platform == "darwin":
     import AppKit
 
 from translate import _
+from inventory_web import InventoryOverview as InventoryWindow
 from cache import ImageCache
 from exceptions import MinerException, ExitRequest
 from utils import resource_path, set_root_icon, webopen, task_wrapper, Game, _T
@@ -1246,6 +1247,7 @@ class TrayIcon:
             self._start()
         else:
             self.icon.visible = True
+        self._manager.inv.hide()
         self._manager._root.withdraw()
 
     def restore(self):
@@ -1308,331 +1310,7 @@ class Notebook:
 class CampaignDisplay(TypedDict):
     frame: ttk.Frame
     status: ttk.Label
-
-
-class InventoryOverview:
-    def __init__(self, manager: GUIManager, master: ttk.Widget):
-        self._manager = manager
-        self._cache: ImageCache = manager._cache
-        self._settings: Settings = manager._twitch.settings
-        self._filters = {
-            "linked": IntVar(master, 0),
-            "not_linked": IntVar(
-                master, self._settings.priority_mode is PriorityMode.PRIORITY_ONLY
-            ),
-            "upcoming": IntVar(master, 1),
-            "expired": IntVar(master, 0),
-            "excluded": IntVar(master, 0),
-            "finished": IntVar(master, 0),
-        }
-        manager.tabs.add_view_event(self._on_tab_switched)
-        # Filtering options
-        filter_frame = ttk.LabelFrame(
-            master, text=_("gui", "inventory", "filter", "name"), padding=(4, 0, 4, 4)
-        )
-        LABEL_SPACING = 20
-        filter_frame.grid(column=0, row=0, columnspan=2, sticky="nsew")
-        ttk.Label(
-            filter_frame, text=_("gui", "inventory", "filter", "show"), padding=(0, 0, 10, 0)
-        ).grid(column=0, row=0)
-        icolumn = 0
-        ttk.Checkbutton(
-            filter_frame, variable=self._filters["linked"]
-        ).grid(column=(icolumn := icolumn + 1), row=0)
-        ttk.Label(
-            filter_frame,
-            text=_("gui", "inventory", "filter", "linked"),
-            padding=(0, 0, LABEL_SPACING, 0),
-        ).grid(column=(icolumn := icolumn + 1), row=0)
-        ttk.Checkbutton(
-            filter_frame, variable=self._filters["not_linked"]
-        ).grid(column=(icolumn := icolumn + 1), row=0)
-        ttk.Label(
-            filter_frame,
-            text=_("gui", "inventory", "filter", "not_linked"),
-            padding=(0, 0, LABEL_SPACING, 0),
-        ).grid(column=(icolumn := icolumn + 1), row=0)
-        ttk.Checkbutton(
-            filter_frame, variable=self._filters["upcoming"]
-        ).grid(column=(icolumn := icolumn + 1), row=0)
-        ttk.Label(
-            filter_frame,
-            text=_("gui", "inventory", "filter", "upcoming"),
-            padding=(0, 0, LABEL_SPACING, 0),
-        ).grid(column=(icolumn := icolumn + 1), row=0)
-        ttk.Checkbutton(
-            filter_frame, variable=self._filters["expired"]
-        ).grid(column=(icolumn := icolumn + 1), row=0)
-        ttk.Label(
-            filter_frame,
-            text=_("gui", "inventory", "filter", "expired"),
-            padding=(0, 0, LABEL_SPACING, 0),
-        ).grid(column=(icolumn := icolumn + 1), row=0)
-        ttk.Checkbutton(
-            filter_frame, variable=self._filters["excluded"]
-        ).grid(column=(icolumn := icolumn + 1), row=0)
-        ttk.Label(
-            filter_frame,
-            text=_("gui", "inventory", "filter", "excluded"),
-            padding=(0, 0, LABEL_SPACING, 0),
-        ).grid(column=(icolumn := icolumn + 1), row=0)
-        ttk.Checkbutton(
-            filter_frame, variable=self._filters["finished"]
-        ).grid(column=(icolumn := icolumn + 1), row=0)
-        ttk.Label(
-            filter_frame,
-            text=_("gui", "inventory", "filter", "finished"),
-            padding=(0, 0, LABEL_SPACING, 0),
-        ).grid(column=(icolumn := icolumn + 1), row=0)
-        ttk.Button(
-            filter_frame, text=_("gui", "inventory", "filter", "refresh"), command=self.refresh
-        ).grid(column=(icolumn := icolumn + 1), row=0)
-        # Inventory view
-        self._canvas = tk.Canvas(master, scrollregion=(0, 0, 0, 0))
-        self._canvas.grid(column=0, row=1, sticky="nsew")
-        master.rowconfigure(1, weight=1)
-        master.columnconfigure(0, weight=1)
-        xscroll = ttk.Scrollbar(master, orient="horizontal", command=self._canvas.xview)
-        xscroll.grid(column=0, row=2, sticky="ew")
-        yscroll = ttk.Scrollbar(master, orient="vertical", command=self._canvas.yview)
-        yscroll.grid(column=1, row=1, sticky="ns")
-        self._canvas.configure(xscrollcommand=xscroll.set, yscrollcommand=yscroll.set)
-        self._canvas.bind("<Configure>", self._canvas_update)
-        self._main_frame = ttk.Frame(self._canvas)
-        self._canvas.bind(
-            "<Enter>", lambda e: self._canvas.bind_all("<MouseWheel>", self._on_mousewheel)
-        )
-        self._canvas.bind("<Leave>", lambda e: self._canvas.unbind_all("<MouseWheel>"))
-        self._canvas.create_window(0, 0, anchor="nw", window=self._main_frame)
-        self._campaigns: dict[DropsCampaign, CampaignDisplay] = {}
-        self._drops: dict[str, ttk.Label] = {}
-
-    def configure_theme(self, *, bg: str):
-        # Canvas background needs manual control
-        self._canvas.configure(bg=bg)
-
-    def _update_visibility(self, campaign: DropsCampaign):
-        # True if the campaign is supposed to show, False makes it hidden.
-        frame = self._campaigns[campaign]["frame"]
-        linked = bool(self._filters["linked"].get())
-        not_linked = bool(self._filters["not_linked"].get())
-        expired = bool(self._filters["expired"].get())
-        excluded = bool(self._filters["excluded"].get())
-        upcoming = bool(self._filters["upcoming"].get())
-        finished = bool(self._filters["finished"].get())
-        priority_only = self._settings.priority_mode is PriorityMode.PRIORITY_ONLY
-        if (
-            campaign.required_minutes > 0  # don't show sub-only campaigns
-            and (not linked or campaign.linked)  # the "linked" filter shows only connected games
-            and (not_linked or campaign.eligible)
-            and (campaign.active or upcoming and campaign.upcoming or expired and campaign.expired)
-            and (
-                excluded or (
-                    campaign.game.name not in self._settings.exclude
-                    and not priority_only or campaign.game.name in self._settings.priority
-                )
-            )
-            and (finished or not campaign.finished)
-        ):
-            frame.grid()
-        else:
-            frame.grid_remove()
-
-    def _on_tab_switched(self, event: tk.Event[ttk.Notebook]) -> None:
-        if self._manager.tabs.current_tab() == 1:
-            # refresh only if we're switching to the tab
-            self.refresh()
-
-    def get_status(self, campaign: DropsCampaign) -> tuple[str, str]:
-        if campaign.active:
-            status_text: str = _("gui", "inventory", "status", "active")
-            status_color: str = "green"
-        elif campaign.upcoming:
-            status_text = _("gui", "inventory", "status", "upcoming")
-            status_color = "goldenrod"
-        else:
-            status_text = _("gui", "inventory", "status", "expired")
-            status_color = "red"
-        return (status_text, status_color)
-
-    def refresh(self):
-        for campaign in self._campaigns:
-            # status
-            status_label = self._campaigns[campaign]["status"]
-            status_text, status_color = self.get_status(campaign)
-            status_label.config(text=status_text, foreground=status_color)
-            # visibility
-            self._update_visibility(campaign)
-        self._canvas_update()
-
-    def _canvas_update(self, event: tk.Event[tk.Canvas] | None = None):
-        self._canvas.update_idletasks()
-        self._canvas.configure(scrollregion=self._canvas.bbox("all"))
-
-    def _on_mousewheel(self, event: tk.Event[tk.Misc]):
-        delta = -1 if event.delta > 0 else 1
-        state: int = event.state if isinstance(event.state, int) else 0
-        if state & 1:
-            scroll = self._canvas.xview_scroll
-        else:
-            scroll = self._canvas.yview_scroll
-        scroll(delta, "units")
-
-    async def add_campaign(self, campaign: DropsCampaign) -> None:
-        campaign_frame = ttk.Frame(self._main_frame, relief="ridge", borderwidth=1, padding=4)
-        campaign_frame.grid(column=0, row=len(self._campaigns), sticky="nsew", pady=3)
-        campaign_frame.rowconfigure(4, weight=1)
-        campaign_frame.columnconfigure(1, weight=1)
-        campaign_frame.columnconfigure(3, weight=10000)
-        # Name
-        ttk.Label(
-            campaign_frame, text=campaign.name, takefocus=False, width=45
-        ).grid(column=0, row=0, columnspan=2, sticky="w")
-        # Status
-        status_text, status_color = self.get_status(campaign)
-        status_label = ttk.Label(
-            campaign_frame, text=status_text, takefocus=False, foreground=status_color
-        )
-        status_label.grid(column=1, row=1, sticky="w", padx=4)
-        # NOTE: We have to save the campaign's frame and status before any awaits happen,
-        # otherwise the len(self._campaigns) call may overwrite an existing frame,
-        # if the campaigns are added concurrently.
-        self._campaigns[campaign] = {
-            "frame": campaign_frame,
-            "status": status_label,
-        }
-        # Starts / Ends
-        MouseOverLabel(
-            campaign_frame,
-            text=_("gui", "inventory", "ends").format(
-                time=campaign.ends_at.astimezone().replace(microsecond=0, tzinfo=None)
-            ),
-            alt_text=_("gui", "inventory", "starts").format(
-                time=campaign.starts_at.astimezone().replace(microsecond=0, tzinfo=None)
-            ),
-            reverse=campaign.upcoming,
-            takefocus=False,
-        ).grid(column=1, row=2, sticky="w", padx=4)
-        # Linking status
-        if campaign.eligible:
-            link_kwargs = {
-                "style": '',
-                "text": _("gui", "inventory", "status", "linked"),
-                "foreground": "green",
-            }
-        else:
-            link_kwargs = {
-                "text": _("gui", "inventory", "status", "not_linked"),
-                "foreground": "red",
-            }
-        LinkLabel(
-            campaign_frame,
-            link=campaign.link_url,
-            takefocus=False,
-            padding=0,
-            **link_kwargs,
-        ).grid(column=1, row=3, sticky="w", padx=4)
-        # ACL channels
-        acl = campaign.allowed_channels
-        if acl:
-            if len(acl) <= 5:
-                allowed_text: str = '\n'.join(ch.name for ch in acl)
-            else:
-                allowed_text = '\n'.join(ch.name for ch in acl[:4])
-                allowed_text += (
-                    f"\n{_('gui', 'inventory', 'and_more').format(amount=len(acl) - 4)}"
-                )
-        else:
-            allowed_text = _("gui", "inventory", "all_channels")
-        ttk.Label(
-            campaign_frame,
-            text=f"{_('gui', 'inventory', 'allowed_channels')}\n{allowed_text}",
-            takefocus=False,
-        ).grid(column=1, row=4, sticky="nw", padx=4)
-        # Image
-        campaign_image = await self._cache.get(campaign.image_url, size=(108, 144))
-        ttk.Label(campaign_frame, image=campaign_image).grid(column=0, row=1, rowspan=4)
-        # Drops separator
-        ttk.Separator(
-            campaign_frame, orient="vertical", takefocus=False
-        ).grid(column=2, row=0, rowspan=5, sticky="ns")
-        # Drops display
-        drops_row = ttk.Frame(campaign_frame)
-        drops_row.grid(column=3, row=0, rowspan=5, sticky="nsew", padx=4)
-        drops_row.rowconfigure(0, weight=1)
-        for i, drop in enumerate(campaign.drops):
-            drop_frame = ttk.Frame(drops_row, relief="ridge", borderwidth=1, padding=5)
-            drop_frame.grid(column=i, row=0, padx=4)
-            benefits_frame = ttk.Frame(drop_frame)
-            benefits_frame.grid(column=0, row=0)
-            benefit_images: list[PhotoImage] = await asyncio.gather(
-                *(self._cache.get(benefit.image_url, (80, 80)) for benefit in drop.benefits)
-            )
-            for i, benefit, image in zip(range(len(drop.benefits)), drop.benefits, benefit_images):
-                ttk.Label(
-                    benefits_frame,
-                    text=benefit.name,
-                    image=image,
-                    compound="bottom",
-                ).grid(column=i, row=0, padx=5)
-            self._drops[drop.id] = label = ttk.Label(drop_frame, justify=tk.CENTER)
-            self.update_progress(drop, label)
-            label.grid(column=0, row=1)
-        if self._manager.tabs.current_tab() == 1:
-            self._update_visibility(campaign)
-            self._canvas_update()
-
-    def clear(self) -> None:
-        for child in self._main_frame.winfo_children():
-            child.destroy()
-        self._drops.clear()
-        self._campaigns.clear()
-
-    def update_progress(self, drop: TimedDrop, label: ttk.Label) -> None:
-        progress_text: str
-        progress_color: str = ''
-        if drop.is_claimed:
-            progress_color = "green"
-            progress_text = _("gui", "inventory", "status", "claimed")
-        elif drop.can_claim:
-            progress_color = "goldenrod"
-            progress_text = _("gui", "inventory", "status", "ready_to_claim")
-        elif drop.current_minutes or drop.can_earn():
-            progress_text = _("gui", "inventory", "percent_progress").format(
-                percent=f"{drop.progress:3.1%}",
-                current=drop.current_minutes,
-                minutes=drop.required_minutes,
-            )
-            if drop.ends_at < drop.campaign.ends_at:
-                # this drop becomes unavailable earlier than the campaign ends
-                progress_text += '\n' + _("gui", "inventory", "ends").format(
-                    time=drop.ends_at.astimezone().replace(microsecond=0, tzinfo=None)
-                )
-        else:
-            if drop.required_minutes > 0:
-                progress_text = _("gui", "inventory", "minutes_progress").format(
-                    minutes=drop.required_minutes
-                )
-            else:
-                # required_minutes is zero for subscription-based drops
-                progress_text = ''
-            if datetime.now(timezone.utc) < drop.starts_at > drop.campaign.starts_at:
-                # this drop can only be earned later than the campaign start
-                progress_text += '\n' + _("gui", "inventory", "starts").format(
-                    time=drop.starts_at.astimezone().replace(microsecond=0, tzinfo=None)
-                )
-            elif drop.ends_at < drop.campaign.ends_at:
-                # this drop becomes unavailable earlier than the campaign ends
-                progress_text += '\n' + _("gui", "inventory", "ends").format(
-                    time=drop.ends_at.astimezone().replace(microsecond=0, tzinfo=None)
-                )
-        label.config(text=progress_text, foreground=progress_color)
-
-    def update_drop(self, drop: TimedDrop) -> None:
-        label = self._drops.get(drop.id)
-        if label is None:
-            return
-        self.update_progress(drop, label)
+    cards: list[ttk.Frame]
 
 
 def proxy_validate(entry: PlaceholderEntry, settings: Settings) -> bool:
@@ -1967,51 +1645,58 @@ class SettingsPanel:
             exclude_frame, text="❌", command=self.exclude_delete, width=3, style="Large.TButton"
         ).grid(column=0, row=2, columnspan=2, sticky="nsew")
 
-        # Drop scan section
+        # Drop scan section. The bar stays hidden until a scan is actually running,
+        # so the tab does not open on a full bar and a 5000-game catalogue count.
         scan_frame = ttk.LabelFrame(
-            center_frame, padding=(4, 0, 4, 4), text=_("gui", "settings", "scan", "name")
+            center_frame, padding=(4, 4, 4, 4), text=_("gui", "settings", "scan", "name")
         )
         scan_frame.grid(column=0, row=2, sticky="nsew")
-        ttk.Label(
-            scan_frame, text=_("gui", "settings", "scan", "interval")
-        ).grid(column=0, row=(srow := 0), sticky="e")
-        SelectCombobox(
-            scan_frame,
-            command=self.scan_interval,
-            textvariable=self._vars["scan_interval"],
-            values=list(self.SCAN_INTERVALS.values()),
-            width=8,
-            width_offset=0,
-        ).grid(column=1, row=srow, sticky="w")
+        scan_frame.columnconfigure(1, weight=1)
         ttk.Button(
             scan_frame,
             text=_("gui", "settings", "scan", "scan_now"),
             command=self.scan_now,
-        ).grid(column=0, row=(srow := srow + 1), sticky="e")
+        ).grid(column=0, row=0, sticky="ew", padx=(0, 8), pady=(2, 0))
         self._scan_status = ttk.Label(
-            scan_frame, text=_("gui", "settings", "scan", "never")
+            scan_frame,
+            text=_("gui", "settings", "scan", "never"),
+            wraplength=280,
+            justify=tk.LEFT,
         )
-        self._scan_status.grid(column=1, row=srow, sticky="w")
-        # how much of the published game list has been checked for drops
+        self._scan_status.grid(column=1, row=0, sticky="w")
         ttk.Label(
-            scan_frame, text=_("gui", "settings", "scan", "coverage_label")
-        ).grid(column=0, row=(srow := srow + 1), sticky="e")
+            scan_frame,
+            text=_("gui", "settings", "scan", "scan_help"),
+            wraplength=460,
+            justify=tk.LEFT,
+        ).grid(column=0, row=1, columnspan=2, sticky="w", pady=(2, 4))
         self._scan_coverage_bar = ttk.Progressbar(
-            scan_frame, mode="determinate", maximum=1, length=180, value=0
+            scan_frame, mode="determinate", maximum=1, length=280, value=0
         )
-        self._scan_coverage_bar.grid(column=1, row=srow, sticky="w")
-        self._scan_coverage = ttk.Label(scan_frame, text="")
-        self._scan_coverage.grid(column=0, row=(srow := srow + 1), columnspan=2, sticky="w")
-        # the published list of campaigns, refreshed on demand; it belongs to the scan, since
-        # it decides which games get probed for drops
+        self._scan_coverage_bar.grid(column=0, row=2, columnspan=2, sticky="ew")
+        self._scan_coverage_bar.grid_remove()
+        self._scan_coverage = ttk.Label(
+            scan_frame, text="", wraplength=460, justify=tk.LEFT
+        )
+        self._scan_coverage.grid(column=0, row=3, columnspan=2, sticky="w", pady=(2, 0))
+        self._scan_coverage.grid_remove()
         self._feed_button = ttk.Button(
             scan_frame,
             text=_("gui", "settings", "feed_reload"),
             command=self._manager._twitch.request_feed_refresh,
         )
-        self._feed_button.grid(column=0, row=(srow := srow + 1), sticky="e")
-        self._feed_status = ttk.Label(scan_frame, text="")
-        self._feed_status.grid(column=1, row=srow, sticky="w")
+        self._feed_button.grid(column=0, row=4, sticky="ew", padx=(0, 8), pady=(8, 0))
+        self._feed_status = ttk.Label(
+            scan_frame, text="", wraplength=280, justify=tk.LEFT
+        )
+        self._feed_status.grid(column=1, row=4, sticky="w")
+        ttk.Label(
+            scan_frame,
+            text=_("gui", "settings", "feed_help"),
+            wraplength=460,
+            justify=tk.LEFT,
+        ).grid(column=0, row=5, columnspan=2, sticky="w", pady=(2, 0))
+        self._scan_after: str | None = None
 
         # Reload button
         reload_frame = ttk.Frame(center_frame)
@@ -2043,59 +1728,97 @@ class SettingsPanel:
     def scan_now(self) -> None:
         self._manager._twitch.start_scan()
         self._scan_status.config(text=_("gui", "settings", "scan", "running"))
-        self._refresh_scan_status()
+        self._show_running_scan()
 
     def _scan_status_text(self) -> str:
-        scan_data, stale, known = self._manager._twitch.scan_status()
-        if not scan_data:
-            return _("gui", "settings", "scan", "never")
+        scan_data, _stale = self._manager._twitch.load_scan_cache()
         scanned_at: str = str(scan_data.get("scanned_at") or "")
+        if not scanned_at:
+            return _("gui", "settings", "scan", "never")
         when: str = scanned_at.replace("T", " ").split(".")[0][:16] or scanned_at
-        text: str = _("gui", "settings", "scan", "status").format(
+        return _("gui", "settings", "scan", "status").format(
             when=when,
             drops=len(scan_data.get("games_with_drops") or []),
-            total=known,
         )
-        if stale:
-            text += " " + _("gui", "settings", "scan", "stale")
-        return text
 
-    def _refresh_scan_coverage(self) -> None:
-        try:
-            if not self._scan_coverage.winfo_exists():
-                return
-            coverage = self._manager._twitch.scan_coverage()
-        except (tk.TclError, AttributeError):
+    def _hide_scan_bar(self) -> None:
+        if str(self._scan_coverage_bar.cget("mode")) != "determinate":
+            self._scan_coverage_bar.stop()
+            self._scan_coverage_bar.config(mode="determinate")
+        if self._scan_coverage_bar.winfo_ismapped():
+            self._scan_coverage_bar.grid_remove()
+
+    def _show_idle_scan(self) -> None:
+        self._hide_scan_bar()
+        progress = self._manager._twitch.scan_progress
+        if str(progress.get("phase") or "") == "error":
+            self._scan_coverage.grid()
+            self._scan_coverage.config(text=str(progress.get("game") or ""))
             return
-        total: int = int(coverage.get("total") or 0)
-        probed: int = int(coverage.get("probed") or 0)
-        fraction: float = (probed / total) if total else 0.0
-        self._scan_coverage_bar.config(value=fraction)
+        scan_data, _stale = self._manager._twitch.load_scan_cache()
+        games = len(scan_data.get("games_with_drops") or [])
+        if games:
+            self._scan_coverage.grid()
+            self._scan_coverage.config(
+                text=_("gui", "settings", "scan", "saved").format(campaigns=games)
+            )
+        elif self._scan_coverage.winfo_ismapped():
+            self._scan_coverage.grid_remove()
+
+    def _show_running_scan(self) -> None:
+        progress = self._manager._twitch.scan_progress
+        phase = str(progress.get("phase") or "prepare")
+        done = int(progress.get("done") or 0)
+        total = int(progress.get("total") or 0)
+        game = str(progress.get("game") or "…")
+        campaigns = int(progress.get("campaigns") or 0)
+        if phase == "channels" and not str(progress.get("game") or ""):
+            game = _("gui", "settings", "scan", "channels_phase")
+        if not self._scan_coverage_bar.winfo_ismapped():
+            self._scan_coverage_bar.grid()
+        if str(self._scan_coverage_bar.cget("mode")) != "determinate":
+            self._scan_coverage_bar.stop()
+            self._scan_coverage_bar.config(mode="determinate")
+        self._scan_coverage.grid()
+        if total <= 0:
+            self._scan_coverage_bar.config(maximum=1, value=0)
+            self._scan_coverage.config(text=_("gui", "settings", "scan", "preparing"))
+            return
+        self._scan_coverage_bar.config(maximum=total, value=done)
         self._scan_coverage.config(
-            text=_("gui", "settings", "scan", "coverage").format(
-                probed=probed,
+            text=_("gui", "settings", "scan", "running_progress").format(
+                done=done,
                 total=total,
-                percent=f"{fraction:.0%}",
-                seed=coverage.get("seed") or 0,
-                campaigns=coverage.get("campaigns") or 0,
+                game=game,
+                campaigns=campaigns,
             )
         )
 
     def _refresh_scan_status(self) -> None:
+        running = False
         try:
             if not self._scan_status.winfo_exists():
                 return
-            if self._manager._twitch.scan_running:
+            running = self._manager._twitch.scan_running
+            if running:
+                self._show_running_scan()
                 text = _("gui", "settings", "scan", "running")
             else:
                 text = self._scan_status_text()
+                self._show_idle_scan()
             self._scan_status.config(text=text)
-            self._refresh_scan_coverage()
             self._refresh_feed_status()
         except tk.TclError:
             # the panel is being torn down
             return
-        self._scan_status.after(5000, self._refresh_scan_status)
+        except Exception:
+            logger.warning("Settings: the scan status could not be refreshed", exc_info=True)
+        if self._scan_after is not None:
+            self._scan_status.after_cancel(self._scan_after)
+        # while a scan is in progress the numbers have to move, not sit for five seconds
+        self._scan_after = self._scan_status.after(
+            1000 if running else 5000, self._refresh_scan_status
+        )
 
     def _refresh_feed_status(self) -> None:
         """Shows how many campaigns the published list carries and when it was published."""
@@ -2397,7 +2120,7 @@ class HelpTab:
             about, text=_("gui", "help", "about", "modified_by"), anchor="e"
         ).grid(column=0, row=1, sticky="nsew", padx=(0, 4))
         LinkLabel(
-            about, link="https://github.com/RoninOnis", text="0xONI"
+            about, link="https://github.com/Tiberius1OOO/TwitchDropsMiner", text="Tiberia"
         ).grid(column=1, row=1, sticky="w")
         # Useful links
         links = ttk.LabelFrame(
@@ -2550,7 +2273,7 @@ class GUIManager:
         self.channels = ChannelList(self, main_frame)
         # Inventory tab
         inv_frame = ttk.Frame(root_frame, padding=8)
-        self.inv = InventoryOverview(self, inv_frame)
+        self.inv = InventoryWindow(self, inv_frame)
         self.tabs.add_tab(inv_frame, name=_("gui", "tabs", "inventory"))
         # Settings tab
         settings_frame = ttk.Frame(root_frame, padding=8)
@@ -2603,12 +2326,16 @@ class GUIManager:
             self._twitch.settings.theme
             or ("dark" if self._twitch.settings.dark_mode else "classic")
         )
-        # stay hidden in tray if needed, otherwise show the window when everything's ready
+        # The visible application is the one window. Tk stays withdrawn and only
+        # keeps the tray icon and the Windows shutdown hook alive.
+        self._root.deiconify = self._show_app  # type: ignore[method-assign]
         if self._twitch.settings.tray and sys.platform != "darwin":
-            # NOTE: this starts the tray icon thread
             self._root.after_idle(self.tray.minimize)
         else:
-            self._root.after_idle(self._root.deiconify)
+            self._root.after_idle(self._show_app)
+
+    def _show_app(self, *args) -> None:
+        self.inv.show()
 
     # https://stackoverflow.com/questions/56329342/tkinter-treeview-background-tag-not-working
     def _fixed_map(self, option):
@@ -2711,6 +2438,7 @@ class GUIManager:
         The window itself will be closed in the closing sequence later.
         """
         self._close_requested.set()
+        self.inv.close_view()
         # notify client we're supposed to close
         self._twitch.close()
         return 0

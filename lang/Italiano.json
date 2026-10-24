@@ -104,12 +104,14 @@
             "filter": {
                 "name": "Filtro",
                 "show": "Mostra:",
+                "linked": "Collegato",
                 "not_linked": "Non collegato",
                 "upcoming": "In arrivo",
                 "expired": "Scaduti",
                 "excluded": "Esclusi",
                 "finished": "Finiti",
-                "refresh": "Aggiorna"
+                "refresh": "Aggiorna",
+                "help": "Collegato: solo le campagne il cui account di gioco è già connesso. Non collegato: mostra anche le campagne che devono ancora essere collegate; senza questa casella restano solo i giochi connessi. In arrivo: campagne non ancora iniziate. Scaduti: campagne già finite. Esclusi: giochi della lista di esclusione. Finiti: campagne i cui drop sono già riscossi. Le caselle mostrano o nascondono solo questi gruppi. L'ordine resta: prima le campagne in corso (quelle collegate sopra, quelle che finiscono prima in cima), poi quelle in arrivo, poi quelle scadute."
             },
             "status": {
                 "linked": "Collegato \u2714",

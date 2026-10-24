@@ -97,12 +97,14 @@
             "filter": {
                 "name": "Filtr",
                 "show": "Drop:",
+                "linked": "Propojeno",
                 "not_linked": "Nepropojeno",
                 "expired": "Ukončeno",
                 "excluded": "Vynecháno",
                 "upcoming": "Nadcházející",
                 "finished": "Dokončeno",
-                "refresh": "Obnovit"
+                "refresh": "Obnovit",
+                "help": "Propojeno: jen kampaně, jejichž herní účet je už propojený. Nepropojeno: ukáže i kampaně, kterým propojení chybí; bez této volby zůstanou jen propojené hry. Nadcházející: kampaně, které ještě nezačaly. Ukončeno: kampaně, které už skončily. Vynecháno: hry ze seznamu vynechaných. Dokončeno: kampaně, jejichž dropy jsou už vyzvednuté. Zaškrtnutí jen skupiny ukáže nebo skryje. Pořadí zůstává: nejdřív běžící kampaně (propojené nahoře, ty co končí nejdřív úplně nahoře), potom nadcházející, potom ukončené."
             },
             "status": {
                 "linked": "ŽIVĚ \u2714",

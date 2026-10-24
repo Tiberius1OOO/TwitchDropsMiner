@@ -105,11 +105,13 @@
                 "name": "Filter",
                 "show": "Weergeven:",
                 "linked": "Alleen gekoppelde",
+                "not_linked": "Niet gekoppeld",
                 "upcoming": "Verwacht",
                 "expired": "Verlopen",
                 "excluded": "Uitgesloten",
                 "finished": "Voltooid",
-                "refresh": "Vernieuwen"
+                "refresh": "Vernieuwen",
+                "help": "Alleen gekoppelde: alleen campagnes waarvan het spelaccount al gekoppeld is. Niet gekoppeld: toon ook campagnes die nog gekoppeld moeten worden; zonder dit vak blijven alleen gekoppelde spellen zichtbaar. Verwacht: campagnes die nog niet zijn gestart. Verlopen: campagnes die al afgelopen zijn. Uitgesloten: spellen van de uitsluitlijst. Voltooid: campagnes waarvan de drops al zijn geclaimd. De vakjes tonen of verbergen alleen die groepen. De volgorde blijft: eerst lopende campagnes (gekoppelde bovenaan, die het eerst eindigen helemaal bovenaan), daarna verwachte, daarna verlopen."
             },
             "status": {
                 "linked": "Gekoppeld ✔",
