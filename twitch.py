@@ -66,6 +66,7 @@ from constants import (
     CHANNEL_DROPS_GAME_ID,
     CHANNEL_DROPS_GAME_NAME,
     MAX_CHANNELS,
+    URGENT_BUFFER_MINUTES,
     GQL_QUERIES,
     WATCH_INTERVAL,
     State,
@@ -118,7 +119,7 @@ class _AuthState:
                 delattr(self, attr)
 
     def invalidate(self, *, delete_cookies: bool = False) -> None:
-        self._delattrs("access_token", "user_id")
+        self._delattrs("access_token", "user_id", "login_name")
         self._logged_in.clear()
         self._twitch.gui.help._invalidate_button.config(state="disabled")
         if delete_cookies:
@@ -131,6 +132,7 @@ class _AuthState:
     def clear(self) -> None:
         self._delattrs(
             "user_id",
+            "login_name",
             "device_id",
             "session_id",
             "access_token",
@@ -504,6 +506,7 @@ class _AuthState:
             else:
                 raise RuntimeError("Login verification failure (step #1)")
             self.user_id = int(validate_response["user_id"])
+            self.login_name = str(validate_response.get("login") or "")
             cookie["persistent"] = str(self.user_id)
             logger.info(f"Login successful, user ID: {self.user_id}")
             login_form.update(_("gui", "login", "logged_in"), self.user_id)
@@ -521,6 +524,9 @@ class Twitch:
         self._state: State = State.IDLE
         self._state_change = asyncio.Event()
         self.wanted_games: list[Game] = []
+        # Games and ACL channels that can still be finished with a tight positive buffer.
+        self._urgent_games: set[Game] = set()
+        self._urgent_channel_ids: set[int] = set()
         self.inventory: list[DropsCampaign] = []
         self._drops: dict[str, TimedDrop] = {}
         self._campaigns: dict[str, DropsCampaign] = {}
@@ -732,11 +738,127 @@ class Twitch:
             return MAX_INT
         return self.wanted_games.index(game)
 
-    @staticmethod
-    def _viewers_key(channel: Channel) -> int:
-        if (viewers := channel.viewers) is not None:
-            return viewers
-        return -1
+    def _mode_allows(self, campaign: DropsCampaign) -> bool:
+        """Priority-only keeps the priority list. The other modes consider every game."""
+        if self.settings.priority_mode is not PriorityMode.PRIORITY_ONLY:
+            return True
+        priority = self.settings.priority
+        return not priority or campaign.game.name in priority
+
+    def _campaign_is_urgent(self, campaign: DropsCampaign, now: datetime | None = None) -> bool:
+        """True when every remaining drop still fits, with spare time inside the window."""
+        if campaign.game.name in self.settings.exclude or not self._mode_allows(campaign):
+            return False
+        buffer = campaign.finish_buffer_minutes(now)
+        return buffer is not None and 0 < buffer <= URGENT_BUFFER_MINUTES
+
+    def _refresh_urgent(self, now: datetime | None = None) -> None:
+        self._urgent_games.clear()
+        self._urgent_channel_ids.clear()
+        for campaign in self.inventory:
+            if not self._campaign_is_urgent(campaign, now):
+                continue
+            if campaign.allowed_channels:
+                self._urgent_channel_ids.update(channel.id for channel in campaign.allowed_channels)
+            if not campaign.game.is_channel_drops():
+                self._urgent_games.add(campaign.game)
+
+    def campaign_audience(self, campaign: DropsCampaign) -> int:
+        """Largest live audience that can actually progress this campaign."""
+        allowed = {channel.id for channel in campaign.allowed_channels}
+        best = 0
+        for channel in self.channels.values():
+            if not channel.online:
+                continue
+            if allowed:
+                if channel.id not in allowed:
+                    continue
+            elif channel.game != campaign.game:
+                continue
+            best = max(best, channel.viewers or 0)
+        # A small viewer change should not jump the row. The channel choice still
+        # uses the exact count.
+        if best >= 1000:
+            return (best // 100) * 100
+        return (best // 50) * 50
+
+    def campaign_sort_key(self, campaign: DropsCampaign) -> tuple:
+        """Inventory order. The miner walks this same order when it picks a game.
+
+        Ending soonest follows the end time. Low availability follows the tightest
+        finishable campaign. Priority only follows the priority list.
+        Anything that can still be completed with a short positive buffer stays above
+        that, and the larger live audience wins when several campaigns are that tight.
+        """
+        now = datetime.now(timezone.utc)
+        name = campaign.game.name
+        title = campaign.name
+        ends = campaign.ends_at.timestamp()
+        if campaign.expired:
+            return (4, -ends, name, title)
+        if campaign.upcoming:
+            return (3, campaign.starts_at.timestamp(), name, title)
+        if self._campaign_is_urgent(campaign, now):
+            buffer = campaign.finish_buffer_minutes(now) or 0
+            return (0, -self.campaign_audience(campaign), buffer, ends, name, title)
+        mode = self.settings.priority_mode
+        priority = self.settings.priority
+        buffer = campaign.finish_buffer_minutes(now)
+        # Campaigns that can still be finished stay above ones that can no longer be completed,
+        # except in ending-soonest mode, where the clock itself is the list.
+        finishable = 0 if buffer is not None and buffer > 0 else 1
+        if mode is PriorityMode.PRIORITY_ONLY:
+            listed = name in priority
+            index = priority.index(name) if listed else MAX_INT
+            return (1, 0 if listed else 1, finishable, index, ends, name, title)
+        if mode is PriorityMode.LOW_AVBL_FIRST:
+            return (1, finishable, campaign.availability, ends, name, title)
+        return (1, ends, name, title)
+
+    def _campaign_is_candidate(self, campaign: DropsCampaign, now: datetime | None = None) -> bool:
+        """A game the current mode is willing to farm within the next hour."""
+        now = now or datetime.now(timezone.utc)
+        game = campaign.game
+        if game.is_channel_drops() or game.name in self.settings.exclude:
+            return False
+        if not self._mode_allows(campaign):
+            return False
+        buffer = campaign.finish_buffer_minutes(now)
+        # No spare time means the remaining drops can no longer all be claimed.
+        if buffer is None or buffer <= 0:
+            return False
+        return campaign.can_earn_within(now + timedelta(hours=1))
+
+    def _next_choice_boundary(self, now: datetime) -> datetime | None:
+        """The next moment a campaign enters or leaves the short spare-time window."""
+        soonest: datetime | None = None
+        for campaign in self.inventory:
+            if campaign.game.name in self.settings.exclude or not self._mode_allows(campaign):
+                continue
+            buffer = campaign.finish_buffer_minutes(now)
+            if buffer is None or buffer <= 0:
+                continue
+            if buffer > URGENT_BUFFER_MINUTES:
+                when = now + timedelta(minutes=buffer - URGENT_BUFFER_MINUTES)
+            else:
+                when = now + timedelta(minutes=buffer)
+            if soonest is None or when < soonest:
+                soonest = when
+        return soonest
+
+    def _is_urgent_channel(self, channel: Channel) -> bool:
+        if channel.id in self._urgent_channel_ids:
+            return True
+        game = channel.game
+        return game is not None and game in self._urgent_games
+
+    def _channel_sort_key(self, channel: Channel) -> tuple:
+        viewers = channel.viewers if channel.viewers is not None else -1
+        acl = 0 if channel.acl_based else 1
+        if self._is_urgent_channel(channel):
+            # One tier for every tight campaign. The bigger audience is watched.
+            return (0, -viewers, acl, channel.id)
+        return (1, self.get_priority(channel), acl, -viewers, channel.id)
 
     async def run(self):
         if self.settings.dump:
@@ -828,36 +950,21 @@ class Twitch:
                                 await drop.claim()
                 # figure out which games we want
                 self.wanted_games.clear()
-                exclude = self.settings.exclude
-                priority = self.settings.priority
-                priority_mode = self.settings.priority_mode
-                priority_only = priority_mode is PriorityMode.PRIORITY_ONLY
-                next_hour = datetime.now(timezone.utc) + timedelta(hours=1)
-                sorted_campaigns: list[DropsCampaign] = list(self.inventory)
-                if not priority_only:
-                    if priority_mode is PriorityMode.ENDING_SOONEST:
-                        sorted_campaigns.sort(key=lambda c: c.ends_at)
-                    elif priority_mode is PriorityMode.LOW_AVBL_FIRST:
-                        sorted_campaigns.sort(key=lambda c: c.availability)
-                sorted_campaigns.sort(
-                    key=lambda c: (
-                        priority.index(c.game.name) if c.game.name in priority else MAX_INT
-                    )
+                # Same order the inventory shows. A short positive buffer stays first,
+                # and the priority list no longer jumps ahead of the selected mode.
+                self._refresh_urgent()
+                sorted_campaigns: list[DropsCampaign] = sorted(
+                    self.inventory, key=self.campaign_sort_key
                 )
+                if self._urgent_games or self._urgent_channel_ids:
+                    urgent_names = ", ".join(sorted(game.name for game in self._urgent_games))
+                    logger.info(
+                        "Urgent campaigns, buffer under "
+                        f"{URGENT_BUFFER_MINUTES} min: {urgent_names or 'channel drops'}"
+                    )
                 for campaign in sorted_campaigns:
                     game: Game = campaign.game
-                    if (
-                        game not in self.wanted_games  # isn't already there
-                        # the pseudo-game of the channel campaigns is never "wanted"
-                        and not game.is_channel_drops()
-                        # and isn't excluded by list or priority mode
-                        and game.name not in exclude
-                        # an empty priority list means "mine whatever is available"
-                        and (not priority_only or not priority or game.name in priority)
-                        # and can be progressed within the next hour
-                        and campaign.can_earn_within(next_hour)
-                    ):
-                        # non-excluded games with no priority are placed last, below priority ones
+                    if game not in self.wanted_games and self._campaign_is_candidate(campaign):
                         self.wanted_games.append(game)
                 full_cleanup = True
                 self.restart_watching()
@@ -949,14 +1056,10 @@ class Twitch:
                     new_channels.update(await self.get_live_streams(game, drops_enabled=True))
                 # only keep the channels that have drops available for our account
                 await self.refresh_available_drops(new_channels)
-                # sort them descending by viewers, by priority and by game priority
-                # NOTE: Viewers sort also ensures ONLINE channels are sorted to the top
+                # Tight campaigns first, and among those the larger audience.
+                # Every other game keeps its wanted-games order, then ACL, then viewers.
                 # NOTE: We can drop using the set now, because there's no more channels being added
-                ordered_channels: list[Channel] = sorted(
-                    new_channels, key=self._viewers_key, reverse=True
-                )
-                ordered_channels.sort(key=lambda ch: ch.acl_based, reverse=True)
-                ordered_channels.sort(key=self.get_priority)
+                ordered_channels: list[Channel] = sorted(new_channels, key=self._channel_sort_key)
                 # ensure that we won't end up with more channels than we can handle
                 # NOTE: we trim from the end because that's where the non-priority,
                 # offline (or online but low viewers) channels end up
@@ -1041,7 +1144,7 @@ class Twitch:
                     # for a switch (including the watching one)
                     # NOTE: we need to sort the channels every time because one channel
                     # can end up streaming any game - channels aren't game-tied
-                    for channel in sorted(channels.values(), key=self.get_priority):
+                    for channel in sorted(channels.values(), key=self._channel_sort_key):
                         if self.should_switch(channel):
                             new_watching = channel
                             break
@@ -1153,10 +1256,20 @@ class Twitch:
             now = datetime.now(timezone.utc)
             if now >= next_period:
                 break
+            # Wake at the next campaign start or end, not at the last one in the hour.
+            # A spare-time boundary that arrives sooner is taken first.
             next_trigger = next_period
+            if self._mnt_triggers:
+                next_trigger = min(next_trigger, self._mnt_triggers[0])
+            boundary = self._next_choice_boundary(now)
+            if (
+                boundary is not None
+                and now + timedelta(seconds=1) < boundary < next_trigger
+            ):
+                next_trigger = boundary
             while self._mnt_triggers and self._mnt_triggers[0] <= next_trigger:
-                next_trigger = self._mnt_triggers.popleft()
-            trigger_type: str = "Reload" if next_trigger == next_period else "Cleanup"
+                self._mnt_triggers.popleft()
+            trigger_type: str = "Reload" if next_trigger == next_period else "Retarget"
             logger.log(
                 CALL,
                 (
@@ -1164,14 +1277,16 @@ class Twitch:
                     f"{next_trigger.astimezone().strftime('%X')} ({trigger_type})"
                 )
             )
-            await asyncio.sleep((next_trigger - now).total_seconds())
+            await asyncio.sleep(max((next_trigger - now).total_seconds(), 0))
             # exit after waiting, before the actions
             now = datetime.now(timezone.utc)
             if now >= next_period:
                 break
-            if next_trigger != next_period:
-                logger.log(CALL, "Maintenance task requests channels cleanup")
-                self.change_state(State.CHANNELS_CLEANUP)
+            logger.log(CALL, "Maintenance task requests a new game choice")
+            # Re-rank before fetching channels again. Cleanup alone would keep
+            # the previous game order and miss a campaign that just opened.
+            if self._state not in (State.INVENTORY_FETCH, State.EXIT):
+                self.change_state(State.GAMES_UPDATE)
         # this triggers a restart of this task every (up to) 60 minutes
         logger.log(CALL, "Maintenance task requests a reload")
         self.change_state(State.INVENTORY_FETCH)
@@ -1213,6 +1328,16 @@ class Twitch:
         watching_channel = self.watching_channel.get_with_default(None)
         if watching_channel is None or not self.can_watch(watching_channel):
             return True
+        channel_urgent = self._is_urgent_channel(channel)
+        watching_urgent = self._is_urgent_channel(watching_channel)
+        if channel_urgent or watching_urgent:
+            if channel_urgent != watching_urgent:
+                return channel_urgent
+            # Both are inside the short window. A different, more watched game wins.
+            # The same game stays put, unless this channel is the one the ACL requires.
+            if channel.game != watching_channel.game:
+                return (channel.viewers or -1) > (watching_channel.viewers or -1)
+            return channel.acl_based > watching_channel.acl_based
         channel_order = self.get_priority(channel)
         watching_order = self.get_priority(watching_channel)
         return (
@@ -2984,7 +3109,8 @@ class Twitch:
         self.inventory.clear()
         self._mnt_triggers.clear()
         switch_triggers: set[datetime] = set()
-        next_hour = datetime.now(timezone.utc) + timedelta(hours=1)
+        now = datetime.now(timezone.utc)
+        next_hour = now + timedelta(hours=1)
         # add the campaigns to the internal inventory
         for campaign in campaigns:
             self._drops.update({drop.id: drop for drop in campaign.drops})
@@ -3020,7 +3146,7 @@ class Twitch:
             if campaign.can_earn(watching_channel):
                 campaigns.append(campaign)
         if campaigns:
-            campaigns.sort(key=lambda c: c.remaining_minutes)
+            campaigns.sort(key=self.campaign_sort_key)
             return campaigns[0]
         return None
 

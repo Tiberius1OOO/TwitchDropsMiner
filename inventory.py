@@ -393,9 +393,12 @@ class DropsCampaign:
 
     @property
     def eligible(self) -> bool:
+        # A missing game link does not block mining. The drop still arrives in the
+        # Twitch inventory, and the account can be connected afterwards.
+        # Badge and emote campaigns stay behind their own setting.
         if self.has_badge_or_emote:
             return self._twitch.settings.enable_badges_emotes
-        return self.linked
+        return True
 
     @cached_property
     def has_badge_or_emote(self) -> bool:
@@ -435,6 +438,25 @@ class DropsCampaign:
             return 0.0
         return min(d.availability for d in self.drops)
 
+    def finish_buffer_minutes(self, now: datetime | None = None) -> float | None:
+        """Minutes still left after the watch time needed to claim every remaining drop.
+
+        This is the same pair of numbers the inventory prints: time until the campaign
+        ends, minus the time to collect all drops. A drop that closes earlier than the
+        campaign tightens that slack. None means there is nothing left to farm.
+        A negative result means the drops can no longer all be finished.
+        """
+        now = now or datetime.now(timezone.utc)
+        if not self.eligible or not self.active or self.remaining_minutes <= 0:
+            return None
+        slack = (self.ends_at - now).total_seconds() / 60 - self.remaining_minutes
+        for drop in self.drops:
+            if drop.is_claimed or drop.required_minutes <= 0 or drop.total_remaining_minutes <= 0:
+                continue
+            deadline = min(self.ends_at, drop.ends_at)
+            slack = min(slack, (deadline - now).total_seconds() / 60 - drop.total_remaining_minutes)
+        return slack
+
     @property
     def first_drop(self) -> TimedDrop | None:
         drops: list[TimedDrop] = sorted(
@@ -453,7 +475,7 @@ class DropsCampaign:
         self, channel: Channel | None = None, ignore_channel_status: bool = False
     ) -> bool:
         return (
-            self.eligible  # account is eligible
+            self.eligible  # campaign can be mined
             and self.active  # campaign is active (and valid)
             and (
                 channel is None or (  # channel isn't specified,

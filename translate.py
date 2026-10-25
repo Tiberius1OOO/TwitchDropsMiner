@@ -78,12 +78,15 @@ class GUILoginForm(TypedDict):
     logging_in: str
     logged_in: str
     logged_out: str
+    logged_in_as: str
     request: str
     required: str
     username: str
     password: str
     twofa_code: str
     button: str
+    logout: str
+    device_code: str
 
 
 class GUIWebsocket(TypedDict):
@@ -327,6 +330,7 @@ default_translation: Translation = {
             "labels": "Status:\nUser ID:",
             "logged_in": "Logged in",
             "logged_out": "Logged out",
+            "logged_in_as": "Logged in as {name}",
             "logging_in": "Logging in...",
             "required": "Login required",
             "request": "Please log in to continue.",
@@ -334,6 +338,8 @@ default_translation: Translation = {
             "password": "Password",
             "twofa_code": "2FA code (optional)",
             "button": "Login",
+            "logout": "Log out",
+            "device_code": "Enter this code on the Twitch page: {code}",
         },
         "websocket": {
             "name": "Websocket Status",
@@ -481,7 +487,7 @@ default_translation: Translation = {
             "priority": "Priority",
             "exclude": "Exclude",
             "reload": "Reload",
-            "reload_text": "Most changes require a reload to take an immediate effect: ",
+            "reload_text": "Mode and Farm take effect immediately. Language and proxy apply on the next start.",
             "feed_reload": "Update the drops list",
             "feed_help": (
                 "Downloads the published list of which games currently have drops, "
@@ -515,24 +521,17 @@ default_translation: Translation = {
             ),
             "getting_started": "Getting Started",
             "getting_started_text": (
-                "1. Login to the application.\n"
-                "2. Ensure your Twitch account is linked to all campaigns "
-                "you're interested in mining.\n"
-                "3. If you're interested in mining everything possible, "
-                "change the Priority Mode to anything other than \"Priority list only\" "
-                "and press on \"Reload\".\n"
-                "4. If you want to mine specific games first, use the \"Priority\" list "
-                "to set up an ordered list of games of your choice. "
-                "Games from the top of the list will be attempted to be mined first, "
-                "before the ones lower down the list.\n"
-                "5. Keep the \"Priority mode\" selected as \"Priority list only\", "
-                "to avoid mining games that are not on the priority list. "
-                "Or not - it's up to you.\n"
-                "6. Use the \"Exclude\" list to tell the application "
-                "which games should never be mined.\n"
-                "7. Changing the contents of either of the lists, or changing "
-                "the \"Priority mode\", requires you to press on \"Reload\" "
-                "for the changes to take an effect."
+                "1. Open Settings and press Login. The Twitch code is shown on that page. "
+                "Enter it on the page that opens.\n"
+                "2. A campaign can be mined before the game account is linked. "
+                "The drop stays in your Twitch inventory, and the game can be connected later.\n"
+                "3. Ending soonest watches the campaign that ends first and can still be finished. "
+                "One with under 30 minutes of spare time is taken first. "
+                "If several are that tight, the game with more viewers is watched.\n"
+                "4. Priority list only watches games on the priority list. "
+                "Ending soonest and Low availability do not let that list jump ahead.\n"
+                "5. Exclude is the list of games that are never mined.\n"
+                "6. A change to the mode or the lists takes effect immediately."
             ),
             "channels": "Drops on a channel",
             "channels_text": (

@@ -369,7 +369,21 @@ def _status(campaign) -> tuple[str, str]:
     return "expired", _("gui", "inventory", "status", "expired")
 
 
-def _rewards(campaign) -> list[dict]:
+def _focus_drop_id(campaign, active_id: str | None) -> str | None:
+    """The drop this campaign is collecting right now, if there is one."""
+    ids = {str(drop.id) for drop in campaign.drops}
+    if active_id and active_id in ids:
+        return active_id
+    for drop in campaign.drops:
+        if drop.is_claimed or drop.required_minutes <= 0:
+            continue
+        if 0 < drop.current_minutes < drop.required_minutes:
+            return str(drop.id)
+    return None
+
+
+def _rewards(campaign, active_id: str | None) -> list[dict]:
+    focus = _focus_drop_id(campaign, active_id)
     rewards: list[dict] = []
     for drop in campaign.drops:
         detail = ""
@@ -379,17 +393,22 @@ def _rewards(campaign) -> list[dict]:
                 current=drop.current_minutes,
                 minutes=drop.required_minutes,
             )
+        claimed = bool(drop.is_claimed)
+        current = not claimed and focus is not None and str(drop.id) == focus
         for benefit in drop.benefits:
             rewards.append({
                 "name": benefit.name,
                 "image": str(benefit.image_url or ""),
-                "claimed": bool(drop.is_claimed),
+                "claimed": claimed,
+                "current": current,
                 "detail": detail or benefit.name,
             })
     return rewards
 
 
-def campaign_payload(campaign, priority: set[str], exclude: set[str]) -> dict | None:
+def campaign_payload(
+    campaign, priority: set[str], exclude: set[str], active_id: str | None = None
+) -> dict | None:
     try:
         kind, label = _status(campaign)
         game_id = int(getattr(campaign.game, "id", 0) or 0)
@@ -411,7 +430,7 @@ def campaign_payload(campaign, priority: set[str], exclude: set[str]) -> dict | 
             "watchable": campaign.required_minutes > 0,
             "farm": campaign.game.name in priority,
             "time": _time_line(campaign),
-            "rewards": _rewards(campaign),
+            "rewards": _rewards(campaign, active_id),
         }
     except Exception:
         return None
@@ -517,13 +536,28 @@ class InventoryOverview:
         except Exception:
             return
 
+    def _account_name(self) -> str:
+        auth = getattr(self._manager._twitch, "_auth_state", None)
+        if auth is None or not hasattr(auth, "user_id"):
+            return ""
+        name = str(getattr(auth, "login_name", "") or "").strip()
+        return name or str(auth.user_id)
+
     def snapshot(self) -> dict:
         twitch = self._manager._twitch
         priority = tuple(self._settings.priority)
         exclude = tuple(sorted(self._settings.exclude))
+        inventory = list(getattr(twitch, "inventory", ()))
+        try:
+            inventory.sort(key=twitch.campaign_sort_key)
+        except Exception:
+            logger.warning("Inventory: the list could not be sorted, showing the saved order")
         rows = []
-        for campaign in getattr(twitch, "inventory", ()):
-            row = campaign_payload(campaign, set(priority), set(exclude))
+        active = self._manager.progress._drop
+        active_id = str(active.id) if active is not None else None
+        audiences: list[str] = []
+        for campaign in inventory:
+            row = campaign_payload(campaign, set(priority), set(exclude), active_id)
             if row is None:
                 key = str(getattr(campaign, "id", "?"))
                 if key not in self._bad_rows:
@@ -531,8 +565,14 @@ class InventoryOverview:
                     logger.warning(f"Inventory: skipped a row that could not be read: {key}")
                 continue
             rows.append(row)
+            try:
+                if twitch._campaign_is_urgent(campaign):
+                    audiences.append(f"{campaign.id}:{twitch.campaign_audience(campaign)}")
+            except Exception:
+                pass
         stamp = int(time.time() // 60)
-        raw = f"{self._revision}|{priority}|{exclude}|{stamp}"
+        mode = getattr(self._settings.priority_mode, "name", "")
+        raw = f"{self._revision}|{priority}|{exclude}|{mode}|{stamp}|{','.join(audiences)}"
         revision = hashlib.sha1(raw.encode()).hexdigest()[:16]
         return {"revision": revision, "campaigns": rows}
 
@@ -572,6 +612,12 @@ class InventoryOverview:
             "password": _("gui", "login", "password"),
             "twofa": _("gui", "login", "twofa_code"),
             "loginButton": _("gui", "login", "button"),
+            "logoutButton": _("gui", "login", "logout"),
+            "accountTitle": _("gui", "login", "name"),
+            "loggedInAs": _("gui", "login", "logged_in_as"),
+            "loggedOut": _("gui", "login", "logged_out"),
+            "logoutHint": _("gui", "help", "invalidate", "text"),
+            "deviceCode": _("gui", "login", "device_code"),
             "switchLabel": _("gui", "channels", "switch"),
             "channels": _("gui", "channels", "name"),
             "output": _("gui", "output"),
@@ -642,6 +688,8 @@ class InventoryOverview:
         progress = gui.progress
         campaign = progress._vars["campaign"]
         drop = progress._vars["drop"]
+        active = progress._drop
+        drop_count = int(active.campaign.total_drops) if active is not None else 0
         table = gui.channels._table
         watching = set(table.tag_has("watching"))
         selected = set(table.selection())
@@ -678,13 +726,17 @@ class InventoryOverview:
             "campaigns": inventory["campaigns"],
             "status": gui.status._label.cget("text"),
             "loginReady": str(gui.login._button.cget("state")) != "disabled",
+            "logoutReady": str(gui.help._invalidate_button.cget("state")) != "disabled",
             "login": gui.login._var.get(),
+            "loginCode": str(getattr(gui.login, "_device_code", "") or ""),
+            "account": self._account_name(),
             "drop": {
                 "game": campaign["game"].get(),
                 "campaign": campaign["name"].get(),
                 "campaignProgress": campaign["progress"].get(),
                 "campaignLabel": campaign["percentage"].get(),
                 "campaignRemaining": campaign["remaining"].get(),
+                "dropCount": drop_count,
                 "rewards": drop["rewards"].get(),
                 "dropProgress": drop["progress"].get(),
                 "dropLabel": drop["percentage"].get(),

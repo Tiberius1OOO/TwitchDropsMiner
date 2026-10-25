@@ -42,6 +42,7 @@
   .kicker { color: var(--muted); font-size: 12px; }
   .title { font-weight: 650; }
   .bars { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 8px; }
+  .bars.single { grid-template-columns: 1fr; }
   .track { height: 8px; background: #12141a; border: 1px solid var(--line); margin-top: 4px; overflow: hidden; }
   .track > div { height: 100%; width: 0; background: var(--green); position: relative; overflow: hidden;
     transition: width 0.8s ease; }
@@ -61,6 +62,10 @@
   button.go, button.small {
     background: var(--row); border: 1px solid var(--line); padding: 5px 10px; cursor: pointer; }
   button.go { color: var(--text); }
+  button.go:disabled { opacity: 0.4; cursor: default; }
+  button.go.ready { border-color: var(--green); color: var(--green); }
+  #account .title { font-size: 15px; margin-top: 2px; }
+  #account .login { margin-top: 10px; }
   .chan { height: 40px; display: grid; grid-template-columns: minmax(140px, 1.2fr) 120px minmax(120px, 1fr) 64px 64px 72px;
     align-items: center; gap: 8px; padding: 0 16px; border-bottom: 1px solid var(--line); background: var(--row); cursor: pointer; }
   .chan.watch { box-shadow: inset 3px 0 0 var(--green); }
@@ -91,9 +96,15 @@
   .side { text-align: right; font-weight: 650; }
   .rewards { display: flex; align-items: flex-start; gap: 8px; height: 84px; overflow: hidden; }
   .tile { width: 72px; flex: 0 0 72px; text-align: center; }
+  .tile .frame { position: relative; width: 56px; height: 56px; margin: 0 auto; }
   .tile span, .more span { display: block; margin-top: 3px; font-size: 11px; color: var(--muted);
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .tile.claimed img { filter: grayscale(0.85); opacity: 0.55; }
+  .tile.claimed img { filter: grayscale(1); opacity: 0.38; }
+  .tile .check { display: none; position: absolute; left: 0; right: 0; top: 0; height: 56px;
+    align-items: center; justify-content: center; color: var(--green);
+    font-size: 26px; font-weight: 700; text-shadow: 0 1px 2px #000; }
+  .tile.claimed .check { display: flex; }
+  .tile.current .frame { box-shadow: 0 0 0 2px #4c8dff, 0 0 14px 3px rgba(76, 141, 255, 0.9); }
   .more { width: 56px; height: 56px; display: flex; align-items: center; justify-content: center;
     font-weight: 650; background: #2a303b; border: 1px solid var(--line); }
   #empty { position: absolute; inset: 0; display: none; align-items: center; justify-content: center; color: var(--muted); }
@@ -128,16 +139,10 @@
 <div id="views">
   <section class="view on" id="view-main">
     <div class="block">
-      <div class="login" id="login">
-        <input id="user" type="text" autocomplete="username">
-        <input id="pass" type="password" autocomplete="current-password">
-        <input id="twofa" type="text" autocomplete="one-time-code">
-        <button type="button" class="go" id="login-go"></button>
-      </div>
       <div class="kicker" id="drop-kicker"></div>
       <div class="title" id="drop-title"></div>
-      <div class="bars">
-        <div>
+      <div class="bars" id="bars">
+        <div id="camp-side">
           <div class="kicker" id="camp-label"></div>
           <div class="track"><div id="camp-bar"></div></div>
           <div class="meta" id="camp-meta"></div>
@@ -167,7 +172,20 @@
     </div>
   </section>
   <section class="view" id="view-settings">
-    <div class="scroll" id="settings"></div>
+    <div class="scroll" id="settings-scroll">
+      <div class="block" id="account">
+        <div class="kicker" id="account-title"></div>
+        <div class="title" id="account-name"></div>
+        <div class="title" id="account-code" hidden></div>
+        <div class="meta" id="account-status"></div>
+        <div class="login on" id="login">
+          <button type="button" class="go" id="login-go"></button>
+          <button type="button" class="go" id="logout"></button>
+        </div>
+        <div class="meta" id="account-hint"></div>
+      </div>
+      <div id="settings"></div>
+    </div>
   </section>
   <section class="view" id="view-help">
     <div class="scroll help" id="help"></div>
@@ -182,10 +200,10 @@ document.querySelectorAll("nav .tab").forEach((button) => {
   button.addEventListener("click", () => showTab(button.dataset.tab));
 });
 document.getElementById("tray").textContent = I18N.tray;
-document.getElementById("user").placeholder = I18N.username;
-document.getElementById("pass").placeholder = I18N.password;
-document.getElementById("twofa").placeholder = I18N.twofa;
+document.getElementById("account-title").textContent = I18N.accountTitle;
+document.getElementById("account-hint").textContent = I18N.logoutHint;
 document.getElementById("login-go").textContent = I18N.loginButton;
+document.getElementById("logout").textContent = I18N.logoutButton;
 document.getElementById("switch").textContent = I18N.switchLabel;
 document.getElementById("chan-name").textContent = I18N.channels;
 document.getElementById("log-name").textContent = I18N.output;
@@ -208,11 +226,12 @@ async function post(op, extra) {
 
 document.getElementById("tray").addEventListener("click", () => post("tray").catch(() => {}));
 document.getElementById("login-go").addEventListener("click", () => {
-  post("login", {
-    username: document.getElementById("user").value,
-    password: document.getElementById("pass").value,
-    token: document.getElementById("twofa").value,
-  }).catch(() => {});
+  if (document.getElementById("login-go").disabled) return;
+  post("login", {}).catch(() => {});
+});
+document.getElementById("logout").addEventListener("click", () => {
+  if (document.getElementById("logout").disabled) return;
+  post("invalidate").catch(() => {});
 });
 document.getElementById("switch").addEventListener("click", () => post("switch").catch(() => {}));
 
@@ -238,6 +257,7 @@ const spacer = document.getElementById("spacer");
 const rows = document.getElementById("rows");
 const empty = document.getElementById("empty");
 let campaigns = [];
+let loginPrompted = false;
 let shown = [];
 let revision = "";
 let painted = "";
@@ -257,16 +277,23 @@ function matches(row) {
 
 function tile(reward) {
   const node = document.createElement("div");
-  node.className = "tile" + (reward.claimed ? " claimed" : "");
+  const state = reward.claimed ? " claimed" : (reward.current ? " current" : "");
+  node.className = "tile" + state;
+  const frame = document.createElement("div");
+  frame.className = "frame";
   const img = document.createElement("img");
   img.alt = "";
   img.width = 56;
   img.height = 56;
   if (reward.image) img.src = reward.image;
+  const check = document.createElement("div");
+  check.className = "check";
+  check.textContent = "\u2713";
+  frame.append(img, check);
   const name = document.createElement("span");
   name.textContent = reward.name;
   node.title = reward.detail || reward.name;
-  node.append(img, name);
+  node.append(frame, name);
   return node;
 }
 
@@ -647,10 +674,32 @@ function apply(state) {
   } else {
     load.hidden = true;
   }
-  document.getElementById("login").classList.toggle("on", !!state.loginReady);
+  const loginButton = document.getElementById("login-go");
+  const logoutButton = document.getElementById("logout");
+  loginButton.disabled = !state.loginReady;
+  loginButton.classList.toggle("ready", !!state.loginReady);
+  logoutButton.disabled = !state.logoutReady;
+  document.getElementById("account-name").textContent = state.account
+    ? I18N.loggedInAs.replace("{name}", state.account)
+    : I18N.loggedOut;
+  const loginText = String(state.login || "").split("\n").map((line) => line.trim()).filter((line) => line && line !== "-");
+  document.getElementById("account-status").textContent = loginText[0] || "";
+  const codeLine = document.getElementById("account-code");
+  if (state.loginCode) {
+    codeLine.hidden = false;
+    codeLine.textContent = I18N.deviceCode.replace("{code}", state.loginCode);
+  } else {
+    codeLine.hidden = true;
+    codeLine.textContent = "";
+  }
+  if (state.loginReady && !loginPrompted) showTab("settings");
+  loginPrompted = !!state.loginReady;
   const drop = state.drop || {};
   document.getElementById("drop-kicker").textContent = drop.game && drop.game !== "..." ? drop.game : I18N.progress;
   document.getElementById("drop-title").textContent = drop.campaign && drop.campaign !== "..." ? drop.campaign : "";
+  const single = !drop.dropCount || drop.dropCount <= 1;
+  document.getElementById("bars").classList.toggle("single", single);
+  document.getElementById("camp-side").hidden = single;
   document.getElementById("camp-label").textContent = drop.campaignLabel || I18N.campaignProgress;
   document.getElementById("drop-label").textContent = drop.rewards && drop.rewards !== "..." ? drop.rewards : I18N.dropProgress;
   document.getElementById("camp-meta").textContent = drop.campaignRemaining || "";

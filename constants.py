@@ -177,6 +177,10 @@ TopicProcess: TypeAlias = "abc.Callable[[int, JsonType], Any]"
 # Values
 MAX_INT = sys.maxsize
 MAX_EXTRA_MINUTES = 15
+# A campaign that can still be finished, but with less than this much spare time,
+# is farmed before everything else. The spare time is what is left after the watch
+# time for every remaining drop.
+URGENT_BUFFER_MINUTES = 30
 BASE_TOPICS = 2
 MAX_WEBSOCKETS = 8
 WS_TOPICS_LIMIT = 50

@@ -548,6 +548,7 @@ class LoginForm:
         # self._token_entry.grid(column=0, row=3, columnspan=2)
 
         self._confirm = asyncio.Event()
+        self._device_code = ""
         self._button = ttk.Button(
             frame, text=_("gui", "login", "button"), command=self._confirm.set, state="disabled"
         )
@@ -599,18 +600,18 @@ class LoginForm:
             return login_data
 
     async def ask_enter_code(self, page_url: URL, user_code: str) -> None:
+        self._device_code = user_code
         self.update(_("gui", "login", "required"), None)
-        # ensure the window isn't hidden into tray when this runs
+        # The code has to be on screen before the browser opens, on the same page as Login.
         self._manager.grab_attention(sound=False)
-        self._manager.print(_("gui", "login", "request"))
+        self._manager.print(_("gui", "login", "device_code").format(code=user_code))
         await self.wait_for_login_press()
-        self._manager.print(f"Enter this code on the Twitch's device activation page: {user_code}")
-        await asyncio.sleep(4)
         webopen(page_url)
 
     def update(self, status: str, user_id: int | None):
         if user_id is not None:
             user_str = str(user_id)
+            self._device_code = ""
         else:
             user_str = "-"
         self._var.set(f"{status}\n{user_str}")
@@ -2040,12 +2041,22 @@ class SettingsPanel:
         self._settings.alter()
         self.update_priority_choices()
 
-    def priority_mode(self, event: tk.Event[ttk.Combobox]) -> None:
+    def priority_mode(self, event: tk.Event[ttk.Combobox] | None = None) -> None:
         mode_name: str = self._vars["priority_mode"].get()
+        chosen: PriorityMode | None = None
         for value, name in self.PRIORITY_MODES.items():
             if mode_name == name:
-                self._settings.priority_mode = value
+                chosen = value
                 break
+        if chosen is None or chosen is self._settings.priority_mode:
+            return
+        self._settings.priority_mode = chosen
+        self._settings.save()
+        twitch = self._manager._twitch
+        # The inventory and the channel choice both follow this mode immediately.
+        if twitch._state not in (State.INVENTORY_FETCH, State.EXIT):
+            twitch.change_state(State.GAMES_UPDATE)
+        self._manager.inv.refresh()
 
     def exclude_add(self) -> None:
         game_name: str = self._exclude_entry.get()
