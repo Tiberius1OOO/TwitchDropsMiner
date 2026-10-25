@@ -70,6 +70,7 @@ class GUITray(TypedDict):
     minimize: str
     show: str
     quit: str
+    still_running: str
 
 
 class GUILoginForm(TypedDict):
@@ -176,6 +177,8 @@ class GUISettingsGeneral(TypedDict):
     name: str
     autostart: str
     tray: str
+    close_to_tray: str
+    close_to_tray_note: str
     tray_notifications: str
     dark_mode: str
     priority_mode: str
@@ -324,6 +327,7 @@ default_translation: Translation = {
             "minimize": "Minimize to Tray",
             "show": "Show",
             "quit": "Quit",
+            "still_running": "Still running in the tray.",
         },
         "login": {
             "name": "Login Form",
@@ -423,6 +427,11 @@ default_translation: Translation = {
                 "name": "General",
                 "autostart": "Autostart: ",
                 "tray": "Autostart into tray: ",
+                "close_to_tray": "Close to the tray: ",
+                "close_to_tray_note": (
+                    "Closing the window leaves the miner running. "
+                    "Open it again from the tray icon, or start the program again."
+                ),
                 "tray_notifications": "Tray notifications: ",
                 "dark_mode": "Dark mode: ",
                 "theme": "Look: ",

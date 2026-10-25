@@ -28,7 +28,9 @@ if __name__ == "__main__":
     from version import __version__
     from exceptions import CaptchaRequired
     from utils import lock_file, resource_path, set_root_icon
-    from constants import LOGGING_LEVELS, SELF_PATH, FILE_FORMATTER, LOG_PATH, LOCK_PATH
+    from constants import (
+        LOGGING_LEVELS, SELF_PATH, FILE_FORMATTER, LOG_PATH, LOCK_PATH, SHOW_PATH,
+    )
 
     if TYPE_CHECKING:
         from _typeshed import SupportsWrite
@@ -200,8 +202,14 @@ if __name__ == "__main__":
         # use lock_file to check if we're not already running
         success, file = lock_file(LOCK_PATH)
         if not success:
-            # already running - exit
+            # The miner is already running. Ask it to open the window, including
+            # when that window was closed to the tray.
+            try:
+                SHOW_PATH.write_text("1", encoding="utf-8")
+            except OSError:
+                pass
             sys.exit(3)
+        SHOW_PATH.unlink(missing_ok=True)
 
         asyncio.run(main())
     finally:

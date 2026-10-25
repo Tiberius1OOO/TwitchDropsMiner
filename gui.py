@@ -1211,8 +1211,27 @@ class TrayIcon:
             title_parts[1] = self._shorten(title_parts[1], missing_len, min_len)
             missing_len = len(''.join(title_parts)) - max_len
         if missing_len > 0:
-            raise MinerException(f"Title couldn't be shortened: {''.join(title_parts)}")
-        return ''.join(title_parts)
+            return "".join(title_parts)[:124] + "..."
+        return "".join(title_parts)
+
+    def ensure_icon(self) -> None:
+        """Show the tray icon without hiding the window."""
+        if sys.platform == "darwin":
+            return
+        if self.icon is None:
+            self._start()
+        else:
+            self.icon.visible = True
+
+    def announce_background(self) -> None:
+        """The window was closed and the miner keeps running."""
+        self.ensure_icon()
+
+        async def later() -> None:
+            await asyncio.sleep(0.6)
+            self.notify(_("gui", "tray", "still_running"), self.TITLE, duration=6)
+
+        asyncio.create_task(later())
 
     def _start(self):
         loop = asyncio.get_running_loop()
@@ -1227,11 +1246,15 @@ class TrayIcon:
             pystray.Menu.SEPARATOR,
             pystray.MenuItem(_("gui", "tray", "quit"), bridge(self.quit)),
         )
+        try:
+            title = self.get_title(drop)
+        except Exception:
+            title = self.TITLE
         self.icon = pystray.Icon(
-            "twitch_miner", self._icon_images[self._icon_state], self.get_title(drop), menu
+            "twitch_miner", self._icon_images[self._icon_state], title[:127], menu
         )
-        # self.icon.run_detached()
-        loop.run_in_executor(None, self.icon.run)
+        # run() has to own a thread. run_detached starts that thread itself.
+        self.icon.run_detached()
 
     def stop(self):
         if self.icon is not None:
@@ -1244,16 +1267,13 @@ class TrayIcon:
     def minimize(self):
         if sys.platform == "darwin":
             return
-        if self.icon is None:
-            self._start()
-        else:
-            self.icon.visible = True
+        self.ensure_icon()
         self._manager.inv.hide()
         self._manager._root.withdraw()
 
     def restore(self):
-        if self.icon is not None:
-            # self.stop()
+        # With close-to-tray the icon stays, so the next close still has a place to land.
+        if self.icon is not None and not self._manager._twitch.settings.close_to_tray:
             self.icon.visible = False
         self._manager._root.deiconify()
 
@@ -1335,6 +1355,7 @@ class _SettingsVars(TypedDict):
     language: StringVar
     priority_mode: StringVar
     tray_notifications: IntVar
+    close_to_tray: IntVar
     enable_badges_emotes: IntVar
     available_drops_check: IntVar
     scan_interval: StringVar
@@ -1391,6 +1412,7 @@ class SettingsPanel:
             ),
             "priority_mode": StringVar(master, self.PRIORITY_MODES[priority_mode]),
             "tray_notifications": IntVar(master, self._settings.tray_notifications),
+            "close_to_tray": IntVar(master, int(self._settings.close_to_tray)),
             "enable_badges_emotes": IntVar(
                 master, int(self._settings.enable_badges_emotes)
             ),
@@ -1465,6 +1487,14 @@ class SettingsPanel:
                     "tray_notifications",
                     bool(self._vars["tray_notifications"].get()),
                 ),
+            ).grid(column=1, row=irow, sticky="w")
+            ttk.Label(
+                checkboxes_frame, text=_("gui", "settings", "general", "close_to_tray")
+            ).grid(column=0, row=(irow := irow + 1), sticky="e")
+            ttk.Checkbutton(
+                checkboxes_frame,
+                variable=self._vars["close_to_tray"],
+                command=self._update_close_to_tray,
             ).grid(column=1, row=irow, sticky="w")
         ttk.Label(
             checkboxes_frame, text=_("gui", "settings", "general", "dark_mode")
@@ -1916,6 +1946,10 @@ class SettingsPanel:
             with plist_file.open('r', encoding="utf8") as file:
                 return str(SELF_PATH.resolve()) in file.read()
 
+    def _update_close_to_tray(self) -> None:
+        self._settings.close_to_tray = bool(self._vars["close_to_tray"].get())
+        self._settings.save()
+
     def update_autostart(self) -> None:
         enabled = bool(self._vars["autostart"].get())
         self._settings.autostart_tray = bool(self._vars["tray"].get())
@@ -2344,6 +2378,8 @@ class GUIManager:
             self._root.after_idle(self.tray.minimize)
         else:
             self._root.after_idle(self._show_app)
+            if self._twitch.settings.close_to_tray and sys.platform != "darwin":
+                self._root.after_idle(self.tray.ensure_icon)
 
     def _show_app(self, *args) -> None:
         self.inv.show()

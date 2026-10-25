@@ -485,7 +485,8 @@ let settingsPaint = "";
 function renderSettings(state) {
   const s = state.settings || {};
   const key = JSON.stringify({
-    language: s.language, autostart: s.autostart, tray: s.tray, notifications: s.notifications,
+    language: s.language, autostart: s.autostart, tray: s.tray, closeToTray: s.closeToTray,
+    notifications: s.notifications,
     mode: s.mode, proxy: s.proxy, priority: s.priority, exclude: s.exclude,
     badges: s.badges, dropsCheck: s.dropsCheck, languages: s.languages, modes: s.modes,
     games: s.games,
@@ -595,6 +596,8 @@ function renderSettings(state) {
     settingRow(I18N.autostart, check(s.autostart, "autostart")),
     settingRow(I18N.trayStart, check(s.tray, "tray")),
     settingRow(I18N.notifications, check(s.notifications, "notifications")),
+    settingRow(I18N.closeToTray, check(!!s.closeToTray, "close_to_tray")),
+    noteBlock(I18N.closeToTrayNote),
     noteBlock(I18N.restart),
     heading(I18N.gamesName),
     settingRow(I18N.mode, select(s.modes, s.mode, "mode")),

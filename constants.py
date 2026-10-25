@@ -103,6 +103,8 @@ LANG_PATH = _resource_path("lang")
 LOG_PATH = Path(WORKING_DIR, "log.txt")
 DUMP_PATH = Path(WORKING_DIR, "dump.dat")
 LOCK_PATH = Path(WORKING_DIR, "lock.file")
+# A second start writes this so the running miner opens its window again.
+SHOW_PATH = Path(WORKING_DIR, "show.request")
 CACHE_PATH = Path(WORKING_DIR, "cache")
 CACHE_DB = Path(CACHE_PATH, "mapping.json")
 COOKIES_PATH = Path(WORKING_DIR, "cookies.jar")

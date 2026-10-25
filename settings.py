@@ -33,6 +33,7 @@ class SettingsFile(TypedDict):
     exclude: set[str]
     priority: list[str]
     autostart_tray: bool
+    close_to_tray: bool
     connection_quality: int
     tray_notifications: bool
     enable_badges_emotes: bool
@@ -63,6 +64,7 @@ default_settings: SettingsFile = {
     # "" follows dark_mode, otherwise one of the names in gui.THEMES
     "theme": "",
     "autostart_tray": False,
+    "close_to_tray": False,
     "connection_quality": 1,
     "language": DEFAULT_LANG,
     "tray_notifications": True,
@@ -118,6 +120,7 @@ class Settings:
     exclude: set[str]
     priority: list[str]
     autostart_tray: bool
+    close_to_tray: bool
     connection_quality: int
     tray_notifications: bool
     enable_badges_emotes: bool

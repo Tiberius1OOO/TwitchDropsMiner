@@ -2,7 +2,7 @@
 
 Desktop program that collects timed Twitch drops. The mining loop comes from [DevilXD/TwitchDropsMiner](https://github.com/DevilXD/TwitchDropsMiner). This copy keeps that loop and puts Main, Inventory, Settings and Help in one window.
 
-Maintained by [Tiberia](https://github.com/Tiberius1OOO/TwitchDropsMiner). Current release: 16.2.5.
+Maintained by [Tiberia](https://github.com/Tiberius1OOO/TwitchDropsMiner). Current release: 16.2.6.
 
 ## Main
 
@@ -58,7 +58,7 @@ Watching another stream in a browser with the same account at the same time make
 
 ## Run on Windows
 
-The Windows build is attached to the [16.2.5 release](https://github.com/Tiberius1OOO/TwitchDropsMiner/releases/tag/v16.2.5). Unpack it and start `Twitch Drops Miner.exe`.
+The Windows build is attached to the [16.2.6 release](https://github.com/Tiberius1OOO/TwitchDropsMiner/releases/tag/v16.2.6). Unpack it and start `Twitch Drops Miner.exe`.
 
 1. Open Settings and press Login. The code is shown on that page.
 2. The miner starts on the campaign that fits the priority mode. Linking a game account can wait until you want the drop inside the game.

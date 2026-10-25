@@ -15,7 +15,7 @@ from pathlib import Path
 from aiohttp import web
 from yarl import URL
 
-from constants import WORKING_DIR, State
+from constants import WORKING_DIR, SHOW_PATH, State
 from translate import _
 from utils import resource_path
 
@@ -253,6 +253,36 @@ setInterval(tick, 1000);
 """
 
 
+def _miner_window_visible() -> bool:
+    """True when the Edge app window is on screen.
+
+    The Tk frame uses the same title and stays withdrawn, so only a visible window counts.
+    """
+    if os.name != "nt":
+        return False
+    import ctypes
+    from ctypes import wintypes
+    user32 = ctypes.windll.user32
+    found = ctypes.c_int(0)
+
+    @ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+    def visit(hwnd, _lparam):
+        if not user32.IsWindowVisible(hwnd):
+            return True
+        length = user32.GetWindowTextLengthW(hwnd)
+        if length <= 0:
+            return True
+        buf = ctypes.create_unicode_buffer(length + 1)
+        user32.GetWindowTextW(hwnd, buf, length + 1)
+        if buf.value.startswith("Twitch Drops Miner"):
+            found.value = 1
+            return False
+        return True
+
+    user32.EnumWindows(visit, 0)
+    return bool(found.value)
+
+
 def _pid_alive(pid: int) -> bool:
     if os.name != "nt" or pid <= 0:
         return False
@@ -453,6 +483,8 @@ class InventoryOverview:
         self._launched = False
         self._lookup_pending = False
         self._seen_window = False
+        self._absent = 0
+        self._parked = False
         self._closing = False
         self._watcher_started = False
         self._lock = threading.Lock()
@@ -500,6 +532,7 @@ class InventoryOverview:
         self._revision += 1
 
     def show(self) -> None:
+        self._parked = False
         if not self._launched or not self._window_alive():
             self._schedule(self.ensure_open())
             return
@@ -651,6 +684,8 @@ class InventoryOverview:
             "advancedName": _("gui", "settings", "advanced", "name"),
             "autostart": _("gui", "settings", "general", "autostart"),
             "trayStart": _("gui", "settings", "general", "tray"),
+            "closeToTray": _("gui", "settings", "general", "close_to_tray"),
+            "closeToTrayNote": _("gui", "settings", "general", "close_to_tray_note"),
             "notifications": _("gui", "settings", "general", "tray_notifications"),
             "mode": _("gui", "settings", "general", "priority_mode"),
             "proxy": _("gui", "settings", "general", "proxy"),
@@ -755,6 +790,7 @@ class InventoryOverview:
                 "languages": list(_.languages),
                 "autostart": bool(panel._vars["autostart"].get()),
                 "tray": bool(panel._vars["tray"].get()),
+                "closeToTray": bool(settings.close_to_tray),
                 "notifications": bool(settings.tray_notifications),
                 "mode": panel._vars["priority_mode"].get(),
                 "modes": modes,
@@ -878,6 +914,13 @@ class InventoryOverview:
             panel._vars["tray"].set(1 if value else 0)
             panel.update_autostart()
             return
+        if key == "close_to_tray":
+            settings.close_to_tray = bool(value)
+            panel._vars["close_to_tray"].set(1 if value else 0)
+            settings.save()
+            if settings.close_to_tray:
+                self._manager.tray.ensure_icon()
+            return
         if key == "notifications":
             settings.tray_notifications = bool(value)
             panel._vars["tray_notifications"].set(1 if value else 0)
@@ -916,18 +959,48 @@ class InventoryOverview:
             return
         raise web.HTTPBadRequest()
 
+    def _consume_show_request(self) -> None:
+        if not SHOW_PATH.exists():
+            return
+        try:
+            SHOW_PATH.unlink()
+        except OSError:
+            return
+        loop = getattr(self._manager._twitch, "_loop", None)
+        if loop is not None and loop.is_running():
+            loop.call_soon_threadsafe(self._manager.tray.restore)
+
+    def _park_in_tray(self) -> None:
+        """The window was closed. Keep mining and leave an icon in the tray."""
+        if self._parked or self._closing:
+            return
+        self._parked = True
+        self._launched = False
+        self._window_pids = []
+        self._proc = None
+        loop = getattr(self._manager._twitch, "_loop", None)
+        if loop is not None and loop.is_running():
+            loop.call_soon_threadsafe(self._manager.tray.announce_background)
+
     def _watch_window(self) -> None:
         while not self._closing:
             time.sleep(1.5)
-            if self._closing or not self._seen_window:
+            if self._closing:
+                return
+            self._consume_show_request()
+            if self._parked or not self._launched or time.time() < self._guard_until:
                 continue
-            alive = [pid for pid in self._window_pids if _pid_alive(pid)]
-            if alive:
-                self._window_pids = alive
+            # The Edge window is gone when its title is no longer on screen.
+            # Helper processes can outlive that window, so a process check is not enough.
+            if _miner_window_visible():
+                self._seen_window = True
+                self._absent = 0
                 continue
-            found = [pid for pid in self._edge_pids() if _pid_alive(pid)]
-            if found:
-                self._window_pids = found
+            self._absent += 1
+            if not self._seen_window and self._absent < 3:
+                continue
+            if self._settings.close_to_tray:
+                self._park_in_tray()
                 continue
             self._closing = True
             loop = getattr(self._manager._twitch, "_loop", None)
